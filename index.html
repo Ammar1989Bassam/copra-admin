@@ -1364,8 +1364,12 @@ function getStock(variantId){
 function getFifoCost(variantId){
   const b=getActiveBatches(variantId)[0];return b?(+b.unit_cost_nis||0):0;
 }
-function fifoDeduct(variantId,qty){
-  let rem=qty,tot=0;
+async function fifoDeduct(variantId,qty){
+  const avail=getStock(variantId);
+  if(avail<=0)return 0;
+  const actualQty=Math.min(qty,avail);
+  let rem=actualQty,tot=0;
+  const batchUpdates=[];
   for(const b of getActiveBatches(variantId)){
     if(rem<=0)break;
     const take=Math.min(rem,+b.qty_remaining||0);
@@ -1373,10 +1377,13 @@ function fifoDeduct(variantId,qty){
     b.qty_remaining=(+b.qty_remaining||0)-take;
     if((+b.qty_remaining||0)<=0)b.status='Depleted';
     rem-=take;
-    dbUpdate('batches', b.id, {qty_remaining:b.qty_remaining, status:b.status});
+    batchUpdates.push(dbUpdate('batches', b.id, {qty_remaining:b.qty_remaining, status:b.status}));
   }
-  var _ns=getStock(variantId);var _vv=gV(variantId);if(_vv){_vv.stock_qty=_ns;dbUpdate('variants',variantId,{stock_qty:_ns});}
-  return qty>0?tot/qty:0;
+  await Promise.all(batchUpdates);
+  const newStock=getStock(variantId);
+  const vv=gV(variantId);
+  if(vv){vv.stock_qty=newStock;await dbUpdate('variants',variantId,{stock_qty:newStock});}
+  return actualQty>0?tot/actualQty:0;
 }
 function fifoRestore(variantId,qty){
   const b=DB.batches.filter(x=>x.variant_id===variantId&&(x.status==='Active'||x.status==='Depleted'))
@@ -1784,7 +1791,7 @@ function onPayTypeChange(){
     if(colWrap)colWrap.style.display='none';
   }
 }
-function addSale(){
+async function addSale(){
   const vid=document.getElementById('s-variant').value;
   const qty=+(document.getElementById('s-qty').value||1);
   const price=+(document.getElementById('s-price').value||0);
@@ -1806,7 +1813,7 @@ function addSale(){
   const cost=getFifoCost(vid);
   const floor=cost*(1+(+v.min_margin_pct||15)/100);
   if(price>0&&price<floor&&!confirm(`⚠️ Price ${nisF(price)} below minimum floor ${nisF(floor)}. Proceed?`))return;
-  const fifoUnit=fifoDeduct(vid,qty);
+  const fifoUnit=await fifoDeduct(vid,qty);
   const payStatus=document.getElementById('s-pstat')?.value||'Pending';
   const p=gP(v.product_id);
   const row={id:uid(),date:document.getElementById('s-date').value||tod(),customer_id:custId,customer_name:custName,
@@ -4050,9 +4057,17 @@ function renderReservations(){
     +'</tbody></table></div>';
 }
 async function approveReservation(id){
-  const r=(DB.reservations||[]).find(x=>x.id===id);if(!r)return;
+  const r=(DB.reservations||[]).find(x=>x.id===id);
+  if(!r||r.status!=='Pending'){alert('This order is no longer pending.');renderReservations();return;}
   const wc=(DB.wholesale_customers||[]).find(c=>c.id===r.customer_id);
-  const v=gV(r.variant_id);if(!v){alert('Variant not found.');return;}
+  const v=gV(r.variant_id);
+  if(!v){alert('Product variant not found.');return;}
+  // Stock check FIRST
+  const avail=getStock(r.variant_id);
+  if(avail<(+r.qty||1)){
+    alert('Cannot approve: only '+avail+' units in stock, order requires '+(+r.qty||1)+'.');
+    return;
+  }
   // Credit check
   const price=(+v.wholesale||0)*(1-(+(wc?.discount_pct||0))/100);
   const orderTotal=price*(+r.qty||1);
@@ -4060,25 +4075,31 @@ async function approveReservation(id){
   const creditLimit=+(wc?.credit_limit_nis||0);
   if(creditLimit>0&&(outstanding+orderTotal)>creditLimit){
     const over=nisF(outstanding+orderTotal-creditLimit);
-    alert('Cannot approve: order would exceed credit limit by '+over+'. Outstanding: '+nisF(outstanding)+' Order: '+nisF(orderTotal)+' Limit: '+nisF(creditLimit));
+    alert('Cannot approve: exceeds credit limit by '+over+'. Outstanding: '+nisF(outstanding)+' | Order: '+nisF(orderTotal)+' | Limit: '+nisF(creditLimit));
     return;
   }
-  if(!confirm('Approve order for '+(wc?.name||'customer')+'? Order total: '+nisF(orderTotal)+'. This will create a wholesale sale.'))return;
-  const fifoUnit=fifoDeduct(r.variant_id,+r.qty||1);
+  if(!confirm('Approve order for '+(wc?.name||'customer')+'? Order: '+nisF(orderTotal)+' ('+r.qty+' units). A wholesale sale will be created.'))return;
+  // Mark as Approved in memory and Supabase FIRST (prevents double-approval)
+  r.status='Approved';
+  await dbUpdate('reservations', r.id, {status:'Approved'});
+  // Now deduct stock
+  const fifoUnit=await fifoDeduct(r.variant_id,+r.qty||1);
   const p=gP(v.product_id);
+  const activeBatch=getActiveBatches(r.variant_id)[0];
   const sale={id:uid(),date:tod(),customer_id:r.customer_id,customer_name:wc?.name||'',
     product_id:v.product_id,product_name:p?.name||'',variant_id:r.variant_id,variant_label:vLabel(v),
-    batch_id:getActiveBatches(r.variant_id)[0]?.id||'',qty:+r.qty||1,unit_price:price,
+    batch_id:activeBatch?.id||'',qty:+r.qty||1,unit_price:price,
     unit_cost_nis:+fifoUnit.toFixed(4),discount_pct:+(wc?.discount_pct||0),payment_type:'Credit',
     payment_status:'Pending',collection_batch_id:'',collection_date:null,sale_type:'Wholesale',
     car_make:v.car_make||'',car_model:v.car_model||'',year_from:v.year_from||null,year_to:v.year_to||null,
-    set_type:v.set_type||'',remark:'Reservation #'+id,gp_nis:+((price-fifoUnit)*(+r.qty||1)).toFixed(2),is_return:false};
+    set_type:v.set_type||'',remark:'Order #'+id,gp_nis:+((price-fifoUnit)*(+r.qty||1)).toFixed(2),is_return:false};
   DB.sales.push(sale);
   await dbInsert('sales', sale);
-  r.status='Approved';r.sale_id=sale.id;
+  // Update reservation with sale_id
+  r.sale_id=sale.id;
   await dbUpdate('reservations', r.id, {status:'Approved', sale_id:sale.id});
   renderReservations();renderSales();renderDash();
-  alert('Sale created successfully.');
+  alert('Approved. Sale created for '+nisF(orderTotal)+'.');
 }
 function rejectReservation(id){
   const r=(DB.reservations||[]).find(x=>x.id===id);if(!r)return;
