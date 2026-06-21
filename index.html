@@ -917,18 +917,20 @@ const SB_SERVICE = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSI
 // ── Core Supabase fetch ──────────────────────────────────────────
 async function sbFetch(path, options={}, useService=false) {
   const key = useService ? SB_SERVICE : SB_ANON;
-  const res = await fetch(SB_URL + path, {
+  const fetchOpts = {
+    method: options.method || 'GET',
     headers: {
       'apikey': key,
       'Authorization': 'Bearer ' + key,
       'Content-Type': 'application/json',
       'Prefer': options.prefer || 'return=minimal'
-    },
-    ...options
-  });
+    }
+  };
+  if (options.body) fetchOpts.body = options.body;
+  const res = await fetch(SB_URL + path, fetchOpts);
   if (!res.ok) {
     const err = await res.text();
-    console.error('Supabase error:', err);
+    console.error('Supabase error on', path, ':', err);
     throw new Error(err);
   }
   const ct = res.headers.get('content-type') || '';
@@ -1318,7 +1320,7 @@ const gP=id=>DB.products.find(x=>x.id===id)||null;
 const gV=id=>DB.variants.find(x=>x.id===id)||null;
 const gWC=id=>DB.wholesale_customers.find(x=>x.id===id)||null;
 const pN=id=>{const p=gP(id);return p?p.name:'—';};
-const vLabel=v=>{if(!v)return'—';if(v.car_make&&v.car_model)return`${v.car_make} ${v.car_model} ${v.year_from}${v.year_to>=2099?'+':'–'+v.year_to}${v.set_type?' · '+v.set_type:''}`;return v.variant_label||pN(v.product_id)||'Base';};
+const vLabel=v=>{if(!v)return'—';if(v.car_make&&v.car_model)return`${v.car_make} ${v.car_model} ${v.year_from?v.year_from:''}${v.year_to&&v.year_to<2099?'–'+v.year_to:v.year_to>=2099?'+':''}${v.set_type?' · '+v.set_type:''}`.trim();return v.set_type&&v.set_type!=='N/A'?v.set_type:pN(v.product_id)||'Base';};
 
 // ═══ FIFO ENGINE (variant-level) ════════════════════════════
 function getActiveBatches(variantId){
@@ -1466,6 +1468,9 @@ function populateSels(){
 
 // ═══ DASHBOARD ═══════════════════════════════════════════════
 function renderDash(){
+  // Update reservation badge in sidebar
+  if(isAdmin()) renderReservations();
+
   document.getElementById('dash-date').textContent=new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
   const sales=DB.sales.filter(s=>!isRet(s));
   const rev=sales.reduce((a,s)=>a+(+s.unit_price||0)*(+s.qty||1),0);
@@ -2443,6 +2448,7 @@ function renderWholesale(){
     </div>`;
   }).join('');
   renderWCStmt();
+  renderReservations();
 }
 function renderWCStmt(){
   const id=document.getElementById('wc-stmt-sel').value;
