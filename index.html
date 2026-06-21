@@ -1056,16 +1056,28 @@ async function dbInsert(table, row) {
   const sbTable = table === 'payments' ? 'partner_payments'
                 : table === 'users'    ? 'app_users'
                 : table;
-  // Map field names that differ between DB and Supabase
   let sbRow = {...row};
   if (table === 'expenses' && sbRow.desc !== undefined) {
     sbRow.description = sbRow.desc;
     delete sbRow.desc;
   }
+  // Sanitize: replace empty strings with null for date/numeric fields
+  const dateFields = ['date','collection_date','payment_date','shipment_date','confirmed_at','datetime'];
+  const numFields  = ['qty','unit_price','unit_cost_nis','discount_pct','gp_nis','amount','total_cost_usd','total_cost_nis','unit_cost_nis','stock_qty','avg_cost_nis','year_from','year_to'];
+  for (const k of Object.keys(sbRow)) {
+    if (sbRow[k] === '' || sbRow[k] === undefined) {
+      if (dateFields.includes(k)) sbRow[k] = null;
+    }
+    if (typeof sbRow[k] === 'string' && numFields.includes(k)) {
+      sbRow[k] = sbRow[k] === '' ? null : +sbRow[k];
+    }
+  }
   try {
     await sbInsert(sbTable, sbRow);
   } catch(e) {
     console.warn('Supabase insert failed for', table, ':', e.message);
+    // Show visible error so we know what's wrong
+    console.error('Row that failed:', JSON.stringify(sbRow).substring(0,300));
   }
 }
 
@@ -1077,6 +1089,12 @@ async function dbUpdate(table, id, updates) {
   if (table === 'expenses' && sbUpdates.desc !== undefined) {
     sbUpdates.description = sbUpdates.desc;
     delete sbUpdates.desc;
+  }
+  const dateFields = ['date','collection_date','payment_date','shipment_date','confirmed_at','datetime'];
+  for (const k of Object.keys(sbUpdates)) {
+    if ((sbUpdates[k] === '' || sbUpdates[k] === undefined) && dateFields.includes(k)) {
+      sbUpdates[k] = null;
+    }
   }
   try { await sbUpdate(sbTable, id, sbUpdates); } catch(e) { console.warn('Supabase update failed for', table, ':', e.message); }
 }
@@ -1787,7 +1805,7 @@ function addSale(){
   const fifoUnit=fifoDeduct(vid,qty);
   const payStatus=document.getElementById('s-pstat')?.value||'Pending';
   const p=gP(v.product_id);
-  const row={id:uid(),date:document.getElementById('s-date').value,customer_id:custId,customer_name:custName,
+  const row={id:uid(),date:document.getElementById('s-date').value||tod(),customer_id:custId,customer_name:custName,
     product_id:v.product_id,product_name:p?p.name:'',variant_id:vid,variant_label:vLabel(v),
     batch_id:getActiveBatches(vid)[0]?.id||'',qty,unit_price:price,unit_cost_nis:+fifoUnit.toFixed(4),
     discount_pct:+(document.getElementById('s-disc').value||0),payment_type:payType,payment_status:payStatus,
