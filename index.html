@@ -1385,10 +1385,17 @@ async function fifoDeduct(variantId,qty){
   if(vv){vv.stock_qty=newStock;await dbUpdate('variants',variantId,{stock_qty:newStock});}
   return actualQty>0?tot/actualQty:0;
 }
-function fifoRestore(variantId,qty){
+async function fifoRestore(variantId,qty){
   const b=DB.batches.filter(x=>x.variant_id===variantId&&(x.status==='Active'||x.status==='Depleted'))
     .sort((a,b)=>String(b.shipment_date).localeCompare(String(a.shipment_date)))[0];
-  if(b){b.qty_remaining=(+b.qty_remaining||0)+qty;b.status='Active';dbUpdate('batches', b.id, b);}
+  if(b){
+    b.qty_remaining=(+b.qty_remaining||0)+qty;
+    b.status='Active';
+    await dbUpdate('batches', b.id, {qty_remaining:b.qty_remaining, status:'Active'});
+    const newStock=getStock(variantId);
+    const v=gV(variantId);
+    if(v){v.stock_qty=newStock;await dbUpdate('variants',variantId,{stock_qty:newStock});}
+  }
 }
 function recalcBatch(batchId){
   const b=DB.batches.find(x=>x.id===batchId);if(!b)return;
@@ -1831,21 +1838,23 @@ async function addSale(){
   document.getElementById('s-gp-preview').style.display='none';
   renderSales();renderDash();
 }
-function addReturn(){
+async function addReturn(){
   const vid=document.getElementById('r-variant').value;
   const qty=+(document.getElementById('r-qty').value||1);
   const amt=+(document.getElementById('r-amt').value||0);
   const cust=document.getElementById('r-cust').value;
   if(!cust){alert('Enter customer name.');return;}
-  if(vid)fifoRestore(vid,qty);
+  if(qty<1){alert('Enter a valid quantity.');return;}
+  if(vid)await fifoRestore(vid,qty);
   const v=gV(vid);const p=v?gP(v.product_id):null;
-  const row={id:uid(),date:document.getElementById('r-date').value,customer_id:'',customer_name:cust,
+  const row={id:uid(),date:document.getElementById('r-date').value||tod(),customer_id:'',customer_name:cust,
     product_id:v?.product_id||'',product_name:p?.name||'',variant_id:vid||'',variant_label:vLabel(v)||'',
     batch_id:'',qty,unit_price:-amt,unit_cost_nis:0,discount_pct:0,payment_type:'Cash',payment_status:'Returned',
-    collection_batch_id:'',collection_date:'',sale_type:'Return',
-    car_make:v?.car_make||'',car_model:v?.car_model||'',year_from:'',year_to:'',set_type:v?.set_type||'',
+    collection_batch_id:'',collection_date:null,sale_type:'Return',
+    car_make:v?.car_make||'',car_model:v?.car_model||'',year_from:null,year_to:null,set_type:v?.set_type||'',
     remark:'Return: '+document.getElementById('r-reason').value,gp_nis:0,is_return:true};
-  DB.sales.push(row);pushRow('sales',row);
+  DB.sales.push(row);
+  await dbInsert('sales',row);
   closeM('m-return');renderSales();renderDash();
 }
 function onReturnProdChange(){
