@@ -219,14 +219,7 @@ tr:hover td{background:rgba(245,246,250,.7)}
 <div id="pg-dashboard" class="pg active">
   <div class="ph"><div><div class="pt">Dashboard</div><div class="ps" id="dash-date"></div></div></div>
   <div class="kg" id="kpi-grid"></div>
-  <!-- Pending wholesale orders notification -->
-  <div id="dash-reservations-panel" style="display:none;background:#fff;border-radius:10px;padding:16px 20px;margin-bottom:16px;border-left:4px solid var(--or);box-shadow:0 1px 3px rgba(0,0,0,.08)">
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <div style="font-weight:700;color:var(--nv)">📋 Pending Wholesale Orders</div>
-      <button class="btn btn-p btn-sm" onclick="nav('wholesale')" style="font-size:12px">View & Approve →</button>
-    </div>
-    <div id="dash-res-list" style="margin-top:10px;font-size:13px"></div>
-  </div>
+  <div id="dash-reservations-panel" style="display:none;background:#fff;border-radius:10px;padding:16px 20px;margin-bottom:16px;border-left:4px solid var(--or);box-shadow:0 1px 3px rgba(0,0,0,.08)"><div style="display:flex;justify-content:space-between;align-items:center"><div style="font-weight:700;color:var(--nv)">📋 Pending Wholesale Orders</div><button class="btn btn-p btn-sm" onclick="nav('wholesale')" style="font-size:12px">View & Approve →</button></div><div id="dash-res-list" style="margin-top:10px;font-size:13px"></div></div>
   <div class="crow">
     <div class="cc"><div class="cct">Revenue by Product</div><div id="chart-prod"></div></div>
     <div class="cc"><div class="cct">Sales Mix</div><div id="chart-mix" style="display:flex;flex-direction:column;gap:10px"></div></div>
@@ -897,7 +890,20 @@ tr:hover td{background:rgba(245,246,250,.7)}
 
 <!-- PAYMENT -->
 <div class="mo" id="m-pay"><div class="md">
-  <div class="mt">Record Partner Payment</
+  <div class="mt">Record Partner Payment</div>
+  <div class="fg fg2">
+    <div class="fgp"><label>Date</label><input type="date" id="pay-date"></div>
+    <div class="fgp"><label>Partner</label><select id="pay-par"><option>Saleem</option><option>Saed</option></select></div>
+    <div class="fgp"><label>Amount (NIS)</label><input type="number" id="pay-amt" placeholder="0.00"></div>
+    <div class="fgp"><label>Remark</label><input type="text" id="pay-rmk"></div>
+  </div>
+  <div class="fa">
+    <button class="btn btn-s" onclick="closeM('m-pay')">Cancel</button>
+    <button class="btn btn-p" onclick="addPayment()">Record</button>
+  </div>
+</div></div>
+
+<script>
 const SK = "copra_session_v1";
 let CURRENT_ROLE = "";
 let CURRENT_USER = null;
@@ -1067,6 +1073,8 @@ async function dbInsert(table, row) {
       sbRow[k] = sbRow[k] === '' ? null : +sbRow[k];
     }
   }
+  const _df=['date','collection_date','payment_date','shipment_date','confirmed_at','datetime'];
+  for(const k of Object.keys(sbRow)){if((sbRow[k]===''||sbRow[k]===undefined)&&_df.includes(k))sbRow[k]=null;}
   try {
     await sbInsert(sbTable, sbRow);
   } catch(e) {
@@ -1366,13 +1374,9 @@ function fifoDeduct(variantId,qty){
     rem-=take;
     dbUpdate('batches', b.id, {qty_remaining:b.qty_remaining, status:b.status});
   }
-  // Update variant stock_qty in Supabase so portal shows correct value
-  const newStock = getStock(variantId);
-  const v = gV(variantId);
-  if(v){
-    v.stock_qty = newStock;
-    dbUpdate('variants', variantId, {stock_qty: newStock, avg_cost_nis: v.avg_cost_nis||0});
-  }
+  const newStock=getStock(variantId);
+  const v=gV(variantId);
+  if(v){v.stock_qty=newStock;dbUpdate('variants',variantId,{stock_qty:newStock});}
   return qty>0?tot/qty:0;
 }
 function fifoRestore(variantId,qty){
@@ -1496,26 +1500,19 @@ function populateSels(){
 
 // ═══ DASHBOARD ═══════════════════════════════════════════════
 function renderDash(){
-  // Update reservation badge + dashboard panel
   if(isAdmin()){
     renderReservations();
     const pending=(DB.reservations||[]).filter(r=>r.status==='Pending');
     const panel=document.getElementById('dash-reservations-panel');
     const listEl=document.getElementById('dash-res-list');
     if(panel){
-      if(pending.length>0){
-        panel.style.display='block';
+      panel.style.display=pending.length?'block':'none';
+      if(listEl&&pending.length){
         listEl.innerHTML=pending.slice(0,5).map(r=>{
           const wc=(DB.wholesale_customers||[]).find(c=>c.id===r.customer_id);
-          const p=gP(r.product_id);
-          const v=gV(r.variant_id);
-          return`<div style="padding:6px 0;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between">
-            <span><strong>${wc?.name||r.customer_name||'?'}</strong> — ${p?.name||'?'} ${v?vLabel(v):''} × ${r.qty}</span>
-            <span style="font-size:11px;color:var(--mu)">${dF(r.date)}</span>
-          </div>`;
-        }).join('')+(pending.length>5?`<div style="font-size:11px;color:var(--mu);padding-top:6px">+${pending.length-5} more pending orders</div>`:'');
-      } else {
-        panel.style.display='none';
+          const p=gP(r.product_id);const v=gV(r.variant_id);
+          return'<div style="padding:6px 0;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between"><span><strong>'+(wc?.name||r.customer_name||'?')+'</strong> — '+(p?.name||'?')+' '+(v?vLabel(v):'')+' × '+r.qty+'</span><span style="font-size:11px;color:var(--mu)">'+dF(r.date)+'</span></div>';
+        }).join('')+(pending.length>5?'<div style="font-size:11px;color:var(--mu);padding-top:6px">+'+(pending.length-5)+' more</div>':'');
       }
     }
   }
@@ -4072,22 +4069,6 @@ function approveReservation(id){
     payment_status:'Pending',collection_batch_id:'',collection_date:'',sale_type:'Wholesale',
     car_make:v.car_make||'',car_model:v.car_model||'',year_from:v.year_from||'',year_to:v.year_to||'',
     set_type:v.set_type||'',remark:'From reservation '+id,gp_nis:+((price-fifoUnit)*(+r.qty||1)).toFixed(2),is_return:false};
-  DB.sales.push(sale);pushRow('sales',sale);
-  r.status='Approved';r.sale_id=sale.id;
-  dbUpdate('reservations', r.id, r);
-  renderReservations();renderSales();renderDash();
-  alert('✅ Reservation approved and sale created.');
-}
-function rejectReservation(id){
-  const r=(DB.reservations||[]).find(x=>x.id===id);if(!r)return;
-  if(!confirm('Reject this reservation?'))return;
-  r.status='Rejected';
-  dbUpdate('reservations', r.id, r);
-  renderReservations();
-}
-
-// nav and openM patches have been merged into the original functions above
-ervation '+id,gp_nis:+((price-fifoUnit)*(+r.qty||1)).toFixed(2),is_return:false};
   DB.sales.push(sale);pushRow('sales',sale);
   r.status='Approved';r.sale_id=sale.id;
   dbUpdate('reservations', r.id, r);
