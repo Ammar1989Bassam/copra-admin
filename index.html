@@ -270,8 +270,54 @@ tr:hover td{background:rgba(245,246,250,.7)}
     </div>
   </div>
   <div class="tabs" id="cb-tabs" style="margin-bottom:14px"><div class="tab active" onclick="cbTab(0,this)">🚗 COD Batches</div><div class="tab" onclick="cbTab(1,this)">🏭 Wholesale Credit Batches</div></div>
-  <div id="cb-t-cod"><div class="al al-i">COD: create batch → tick collected sales → close → all marked Collected.</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-bottom:18px" id="cb-cards"></div><div class="tc"><div class="tch"><div class="tct" id="cb-pending-title">Pending COD Sales</div><select id="cb-assign-sel" style="font-size:12px;padding:5px 9px;border:1px solid var(--bd);border-radius:6px"><option value="">Select open batch…</option></select></div><div id="cb-pending-tbl"></div></div></div>
-  <div id="cb-t-whl" style="display:none"><div class="al al-i">Wholesale: create batch → tick credit invoices paid → close → marked Collected with date on statement.</div><div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center"><button class="btn btn-p" onclick="openNewWhlBatch()">+ New Wholesale Batch</button><select id="whl-cust-filter" onchange="renderWhlPending()" style="font-size:12px;padding:6px 10px;border:1px solid var(--bd);border-radius:6px;min-width:180px"><option value="">All Customers</option></select></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-bottom:18px" id="whl-cb-cards"></div><div class="tc"><div class="tch"><div class="tct" id="whl-pending-title">Pending Wholesale Credit Sales</div><select id="whl-assign-sel" style="font-size:12px;padding:5px 9px;border:1px solid var(--bd);border-radius:6px"><option value="">Select open batch…</option></select></div><div id="whl-pending-tbl"></div></div></div>
+  <div id="cb-t-cod">
+  <div class="al al-i">COD: create batch → assign collected sales → close → all marked Collected.</div>
+  <!-- Open batches (cards) -->
+  <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--mu);margin-bottom:8px;letter-spacing:.05em">Open Batches</div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-bottom:20px" id="cb-cards"></div>
+  <!-- Closed history (table) -->
+  <div class="tc" style="margin-bottom:16px">
+    <div class="tch">
+      <div class="tct">Batch History</div>
+      <input type="text" id="cb-hist-search" placeholder="🔍 Search batches…" oninput="renderColBatches()" style="font-size:12px;padding:5px 10px;border:1px solid var(--bd);border-radius:6px;width:200px">
+    </div>
+    <div id="cb-history-tbl"></div>
+  </div>
+  <!-- Pending COD sales -->
+  <div class="tc">
+    <div class="tch">
+      <div class="tct" id="cb-pending-title">Pending COD Sales</div>
+      <select id="cb-assign-sel" style="font-size:12px;padding:5px 9px;border:1px solid var(--bd);border-radius:6px"><option value="">Select open batch…</option></select>
+    </div>
+    <div id="cb-pending-tbl"></div>
+  </div>
+</div>
+  <div id="cb-t-whl" style="display:none">
+  <div class="al al-i">Wholesale: create batch → assign credit invoices → close → marked Collected on statement.</div>
+  <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
+    <button class="btn btn-p" onclick="openNewWhlBatch()">+ New Wholesale Batch</button>
+    <select id="whl-cust-filter" onchange="renderWhlPending()" style="font-size:12px;padding:6px 10px;border:1px solid var(--bd);border-radius:6px;min-width:180px"><option value="">All Customers</option></select>
+  </div>
+  <!-- Open batches (cards) -->
+  <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--mu);margin-bottom:8px;letter-spacing:.05em">Open Batches</div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-bottom:20px" id="whl-cb-cards"></div>
+  <!-- Closed history (table) -->
+  <div class="tc" style="margin-bottom:16px">
+    <div class="tch">
+      <div class="tct">Batch History</div>
+      <input type="text" id="whl-hist-search" placeholder="🔍 Search batches…" oninput="renderWhlColBatches()" style="font-size:12px;padding:5px 10px;border:1px solid var(--bd);border-radius:6px;width:200px">
+    </div>
+    <div id="whl-history-tbl"></div>
+  </div>
+  <!-- Pending wholesale sales -->
+  <div class="tc">
+    <div class="tch">
+      <div class="tct" id="whl-pending-title">Pending Wholesale Credit Sales</div>
+      <select id="whl-assign-sel" style="font-size:12px;padding:5px 9px;border:1px solid var(--bd);border-radius:6px"><option value="">Select open batch…</option></select>
+    </div>
+    <div id="whl-pending-tbl"></div>
+  </div>
+</div>
 </div>
 
 <!-- INVENTORY -->
@@ -2042,70 +2088,108 @@ function closeBatch(batchId){
   renderColBatches();renderSales();renderDash();
 }
 function renderColBatches(){
-  const cards=document.getElementById('cb-cards');
-  cards.innerHTML=[...DB.collection_batches].sort((a,b)=>String(b.collection_date||'').localeCompare(String(a.collection_date||''))).map(b=>{
-    const isOpen=b.status==='Open';
-    // Count actual invoices in this batch
-    const batchSales=DB.sales.filter(s=>s.collection_batch_id===b.id&&!isRet(s));
-    const batchTotal=batchSales.reduce((a,s)=>a+(+s.unit_price||0)*(+s.qty||1),0);
-    return`<div class="kc" style="border-top:3px solid ${isOpen?'var(--gd)':'var(--gn)'}">
-      <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:7px">
-        <div>
-          <div style="font-weight:700;font-size:14px">${b.batch_name}</div>
-          <div style="font-size:11px;color:var(--mu)">${b.collection_date?dF(b.collection_date):'No date'} ${b.barcode?'· '+b.barcode:''}</div>
-        </div>
-        <span class="b ${isOpen?'bo':'bg'}">${b.status}</span>
-      </div>
-      <div style="font-size:12px;margin-bottom:9px;display:flex;gap:14px">
-        <span>Invoices: <strong>${batchSales.length}</strong></span>
-        <span>Total: <strong>${nisF(batchTotal)}</strong></span>
-      </div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap">
-        <button class="btn btn-s btn-sm" onclick="viewBatchInvoices('${b.id}')">📋 View Invoices</button>
-        <button class="btn btn-s btn-sm" onclick="openEditBatch('${b.id}')">✏️ Edit</button>
-        ${isOpen?`<button class="btn btn-p btn-sm" onclick="closeBatch('${b.id}')">✅ Close Batch</button>`:''}
-      </div>
-    </div>`;
-  }).join('');
+  // ── COD BATCHES ──────────────────────────────────────────────
+  const allCOD=[...DB.collection_batches].sort((a,b)=>String(b.collection_date||'').localeCompare(String(a.collection_date||'')));
+  const openCOD=allCOD.filter(b=>b.status==='Open');
+  const closedCOD=allCOD.filter(b=>b.status!=='Open');
 
-  // Pending COD sales table with LIVE SUM
+  const cardsEl=document.getElementById('cb-cards');
+  if(cardsEl){
+    // Active batches as cards
+    if(!openCOD.length){
+      cardsEl.innerHTML='<div style="font-size:12px;color:var(--mu);padding:8px 0">No open COD batches. Create one to start collecting.</div>';
+    } else {
+      cardsEl.innerHTML=openCOD.map(b=>{
+        const bSales=DB.sales.filter(s=>s.collection_batch_id===b.id&&!isRet(s));
+        const bTotal=bSales.reduce((a,s)=>a+(+s.unit_price||0)*(+s.qty||1),0);
+        return`<div class="kc" style="border-top:3px solid var(--gd)">
+          <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:7px">
+            <div>
+              <div style="font-weight:700;font-size:14px">${b.batch_name}</div>
+              <div style="font-size:11px;color:var(--mu)">${b.collection_date?dF(b.collection_date):'No date'}${b.barcode?' · '+b.barcode:''}</div>
+            </div>
+            <span class="b bo">Open</span>
+          </div>
+          <div style="font-size:12px;margin-bottom:9px;display:flex;gap:14px">
+            <span>Invoices: <strong>${bSales.length}</strong></span>
+            <span>Total: <strong>${nisF(bTotal)}</strong></span>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-s btn-sm" onclick="viewBatchInvoices('${b.id}')">📋 View</button>
+            <button class="btn btn-s btn-sm" onclick="openEditBatch('${b.id}')">✏️ Edit</button>
+            <button class="btn btn-p btn-sm" onclick="closeBatch('${b.id}')">✅ Close</button>
+          </div>
+        </div>`;
+      }).join('');
+    }
+  }
+
+  // Closed batches history table
+  const histEl=document.getElementById('cb-history-tbl');
+  const histSearch=document.getElementById('cb-hist-search')?.value?.toLowerCase()||'';
+  if(histEl){
+    const filtered=closedCOD.filter(b=>
+      !histSearch||
+      (b.batch_name||'').toLowerCase().includes(histSearch)||
+      (b.barcode||'').toLowerCase().includes(histSearch)||
+      (b.collection_date||'').includes(histSearch)
+    );
+    if(!filtered.length){
+      histEl.innerHTML='<div style="padding:16px;text-align:center;color:var(--mu);font-size:12px">'+(closedCOD.length?'No results for "'+histSearch+'"':'No closed batches yet.')+'</div>';
+    } else {
+      histEl.innerHTML='<div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Batch Name</th><th>Barcode</th><th>Invoices</th><th>Total</th><th>Status</th><th></th></tr></thead><tbody>'+
+        filtered.map(b=>{
+          const bSales=DB.sales.filter(s=>s.collection_batch_id===b.id&&!isRet(s));
+          const bTotal=bSales.reduce((a,s)=>a+(+s.unit_price||0)*(+s.qty||1),0);
+          return`<tr>
+            <td>${b.collection_date?dF(b.collection_date):'—'}</td>
+            <td><strong>${b.batch_name}</strong></td>
+            <td style="font-size:11px;color:var(--mu)">${b.barcode||'—'}</td>
+            <td>${bSales.length}</td>
+            <td>${nisF(bTotal)}</td>
+            <td><span class="b bg">Closed</span></td>
+            <td><button class="btn btn-s btn-sm" onclick="viewBatchInvoices('${b.id}')">📋 View</button></td>
+          </tr>`;
+        }).join('')
+        +'</tbody></table></div>';
+    }
+  }
+
+  // Pending COD sales
   const pnd=DB.sales.filter(s=>!isRet(s)&&s.payment_type==='COD'&&!isColl(s.payment_status)).sort((a,b)=>String(a.date).localeCompare(String(b.date)));
   const openBatches=DB.collection_batches.filter(b=>b.status==='Open');
-  document.getElementById('cb-pending-title').textContent=`Pending COD Sales (${pnd.length})`;
-  if(!pnd.length){
-    document.getElementById('cb-pending-tbl').innerHTML='<div style="padding:16px;text-align:center;color:var(--gn);font-size:12px">✅ No pending COD sales</div>';
-    return;
-  }
+  const titleEl=document.getElementById('cb-pending-title');
+  if(titleEl)titleEl.textContent='Pending COD Sales ('+pnd.length+')';
   const sel=document.getElementById('cb-assign-sel');
   if(sel)sel.innerHTML='<option value="">Select open batch…</option>'+openBatches.map(b=>`<option value="${b.id}">${b.batch_name}</option>`).join('');
-
-  // Reset live sum
-  const sc=document.getElementById('cb-sum-count');const st=document.getElementById('cb-sum-total');if(sc)sc.textContent='0';if(st)st.textContent='₪0';
-  document.getElementById('cb-pending-tbl').innerHTML=`
-    <div style="overflow-x:auto"><table><thead><tr>
-      <th><input type="checkbox" onchange="toggleAllCB(this)"></th>
-      <th>Date</th><th>Customer</th><th>Product</th><th>Variant</th><th>Amount</th>
-    </tr></thead><tbody>${
-      pnd.map(s=>`<tr>
-        <td><input type="checkbox" class="cb-check" data-sid="${s.id}" data-amt="${(+s.unit_price||0)*(+s.qty||1)}" onchange="updateCBSum()" style="width:16px;height:16px"></td>
-        <td>${dF(s.date)}</td>
-        <td>${s.customer_name||s.customer||'—'}</td>
-        <td>${pN(s.product_id)||'—'}</td>
-        <td>${s.variant_label||'—'}</td>
-        <td><strong>${nisF((+s.unit_price||0)*(+s.qty||1))}</strong></td>
-      </tr>`).join('')
-    }</tbody></table></div>
-    <div id="cb-live-sum" style="padding:12px 14px;background:var(--nv);color:#fff;border-radius:0 0 8px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
-      <div style="font-size:13px">
-        Selected: <strong id="cb-sum-count">0</strong> invoices &nbsp;·&nbsp;
-        Total: <strong id="cb-sum-total" style="font-size:15px;color:var(--gd)">₪0</strong>
-      </div>
-      <div style="display:flex;gap:7px;align-items:center">
-        <span style="font-size:11px;opacity:.7">Assign to:</span>
-        ${openBatches.map(b=>`<button class="btn btn-sm" style="background:var(--gd);color:#fff;border:none;cursor:pointer;padding:6px 12px" onclick="assignToBatch('${b.id}')">✅ ${b.batch_name}</button>`).join('')}
-        ${!openBatches.length?'<span style="font-size:11px;opacity:.7">Create a batch first</span>':''}
-      </div>
-    </div>`;
+  const sc2=document.getElementById('cb-sum-count');const st=document.getElementById('cb-sum-total');if(sc2)sc2.textContent='0';if(st)st.textContent='₪0';
+  const pndEl=document.getElementById('cb-pending-tbl');
+  if(!pndEl)return;
+  if(!pnd.length){
+    pndEl.innerHTML='<div style="padding:16px;text-align:center;color:var(--gn);font-size:12px">✅ No pending COD sales</div>';
+    return;
+  }
+  pndEl.innerHTML=`<div style="overflow-x:auto"><table><thead><tr>
+    <th><input type="checkbox" onchange="toggleAllCB(this)"></th>
+    <th>Date</th><th>Customer</th><th>Product</th><th>Variant</th><th>Amount</th>
+  </tr></thead><tbody>${
+    pnd.map(s=>`<tr>
+      <td><input type="checkbox" class="cb-check" data-sid="${s.id}" data-amt="${(+s.unit_price||0)*(+s.qty||1)}" onchange="updateCBSum()" style="width:16px;height:16px"></td>
+      <td>${dF(s.date)}</td>
+      <td>${s.customer_name||s.customer||'—'}</td>
+      <td>${pN(s.product_id)||'—'}</td>
+      <td>${s.variant_label||'—'}</td>
+      <td><strong>${nisF((+s.unit_price||0)*(+s.qty||1))}</strong></td>
+    </tr>`).join('')
+  }</tbody></table></div>
+  <div id="cb-live-sum" style="padding:12px 14px;background:var(--nv);color:#fff;border-radius:0 0 8px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+    <div style="font-size:13px">Selected: <strong id="cb-sum-count">0</strong> invoices &nbsp;·&nbsp; Total: <strong id="cb-sum-total" style="font-size:15px;color:var(--gd)">₪0</strong></div>
+    <div style="display:flex;gap:7px;align-items:center">
+      <span style="font-size:11px;opacity:.7">Assign to:</span>
+      ${openBatches.map(b=>`<button class="btn btn-sm" style="background:var(--gd);color:#fff;border:none;cursor:pointer;padding:6px 12px" onclick="assignToBatch('${b.id}')">✅ ${b.batch_name}</button>`).join('')}
+      ${!openBatches.length?'<span style="font-size:11px;opacity:.7">Create a batch first</span>':''}
+    </div>
+  </div>`;
 }
 function toggleAllCB(master){document.querySelectorAll('.cb-check').forEach(cb=>cb.checked=master.checked);}
 function assignToBatch(batchId){
@@ -2810,7 +2894,7 @@ function saveWhlBatch(){
 // ── Render wholesale batches tab ──────────────────────────────────────
 function renderWhlColBatches(){
   if(!DB.wholesale_batches)DB.wholesale_batches=[];
-  // Populate customer filter
+  // Customer filter
   const fSel=document.getElementById('whl-cust-filter');
   if(fSel){
     const cur=fSel.value;
@@ -2818,26 +2902,28 @@ function renderWhlColBatches(){
       DB.wholesale_customers.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
     fSel.value=cur;
   }
-  // Cards
+  const allWhl=[...DB.wholesale_batches].sort((a,b)=>String(b.collection_date||'').localeCompare(String(a.collection_date||'')));
+  const openWhl=allWhl.filter(b=>b.status==='Open');
+  const closedWhl=allWhl.filter(b=>b.status!=='Open');
+
+  // Active cards
   const cards=document.getElementById('whl-cb-cards');
-  if(!DB.wholesale_batches.length){
-    cards.innerHTML='<div style="color:var(--mu);font-size:12px;padding:10px">No wholesale batches yet.</div>';
-  } else {
-    cards.innerHTML=[...DB.wholesale_batches]
-      .sort((a,b)=>String(b.collection_date||'').localeCompare(String(a.collection_date||'')))
-      .map(b=>{
-        const isOpen=b.status==='Open';
+  if(cards){
+    if(!openWhl.length){
+      cards.innerHTML='<div style="font-size:12px;color:var(--mu);padding:8px 0">No open wholesale batches.</div>';
+    } else {
+      cards.innerHTML=openWhl.map(b=>{
         const wc=gWC(b.customer_id);
         const bSales=DB.sales.filter(s=>s.collection_batch_id===b.id&&!isRet(s));
         const bTotal=bSales.reduce((a,s)=>a+(+s.unit_price||0)*(+s.qty||1),0);
-        return`<div class="kc" style="border-top:3px solid ${isOpen?'var(--nv)':'var(--gn)'}">
+        return`<div class="kc" style="border-top:3px solid var(--nv)">
           <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:7px">
             <div>
               <div style="font-weight:700;font-size:14px">${b.batch_name}</div>
               <div style="font-size:11px;color:var(--mu)">${wc?wc.name:'—'} · ${b.collection_date?dF(b.collection_date):'No date'}</div>
               ${b.reference?`<div style="font-size:11px;color:var(--mu)">Ref: ${b.reference}</div>`:''}
             </div>
-            <span class="b ${isOpen?'bb':'bg'}">${b.status}</span>
+            <span class="b bb">Open</span>
           </div>
           <div style="font-size:12px;margin-bottom:9px;display:flex;gap:14px">
             <span>Invoices: <strong>${bSales.length}</strong></span>
@@ -2846,10 +2932,42 @@ function renderWhlColBatches(){
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             <button class="btn btn-s btn-sm" onclick="viewWhlBatchInvoices('${b.id}')">📋 View</button>
             <button class="btn btn-s btn-sm" onclick="openEditWhlBatch('${b.id}')">✏️ Edit</button>
-            ${isOpen?`<button class="btn btn-p btn-sm" onclick="closeWhlBatch('${b.id}')">✅ Close Batch</button>`:''}
+            <button class="btn btn-p btn-sm" onclick="closeWhlBatch('${b.id}')">✅ Close</button>
           </div>
         </div>`;
       }).join('');
+    }
+  }
+
+  // Closed history table
+  const histEl=document.getElementById('whl-history-tbl');
+  const histSearch=document.getElementById('whl-hist-search')?.value?.toLowerCase()||'';
+  if(histEl){
+    const filtered=closedWhl.filter(b=>
+      !histSearch||
+      (b.batch_name||'').toLowerCase().includes(histSearch)||
+      (gWC(b.customer_id)?.name||'').toLowerCase().includes(histSearch)||
+      (b.collection_date||'').includes(histSearch)
+    );
+    if(!filtered.length){
+      histEl.innerHTML='<div style="padding:16px;text-align:center;color:var(--mu);font-size:12px">'+(closedWhl.length?'No results for "'+histSearch+'"':'No closed batches yet.')+'</div>';
+    } else {
+      histEl.innerHTML='<div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Batch Name</th><th>Customer</th><th>Invoices</th><th>Total</th><th></th></tr></thead><tbody>'+
+        filtered.map(b=>{
+          const wc=gWC(b.customer_id);
+          const bSales=DB.sales.filter(s=>s.collection_batch_id===b.id&&!isRet(s));
+          const bTotal=bSales.reduce((a,s)=>a+(+s.unit_price||0)*(+s.qty||1),0);
+          return`<tr>
+            <td>${b.collection_date?dF(b.collection_date):'—'}</td>
+            <td><strong>${b.batch_name}</strong></td>
+            <td>${wc?wc.name:'—'}</td>
+            <td>${bSales.length}</td>
+            <td>${nisF(bTotal)}</td>
+            <td><button class="btn btn-s btn-sm" onclick="viewWhlBatchInvoices('${b.id}')">📋 View</button></td>
+          </tr>`;
+        }).join('')
+        +'</tbody></table></div>';
+    }
   }
   renderWhlPending();
 }
