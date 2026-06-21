@@ -966,48 +966,56 @@ let DB = {
 let DB_LOADED = false;
 
 async function loadAllData() {
-  try {
-    showLoader('Loading data…');
-    const tables = [
-      'products','variants','batches','stock_costs','sales',
-      'collection_batches','wholesale_customers','suppliers',
-      'supplier_payments','expenses','partner_payments','purchases',
-      'settings','fixed_assets','app_users','reservations',
-      'cash_handovers','vehicle_catalog','supplier_batches','wholesale_batches'
-    ];
-    const results = await Promise.all(tables.map(t => sbSelect(t)));
-    DB.products            = results[0]  || [];
-    DB.variants            = results[1]  || [];
-    DB.batches             = results[2]  || [];
-    DB.stock_costs         = results[3]  || [];
-    DB.sales               = results[4]  || [];
-    DB.collection_batches  = results[5]  || [];
-    DB.wholesale_customers = results[6]  || [];
-    DB.suppliers           = results[7]  || [];
-    DB.supplier_payments   = results[8]  || [];
-    DB.expenses            = results[9]  || [];
-    DB.payments            = results[10] || [];
-    DB.purchases           = results[11] || [];
-    DB.settings            = results[12] || [];
-    DB.fixed_assets        = results[13] || [];
-    DB.users               = results[14] || [];
-    DB.reservations        = results[15] || [];
-    DB.cash_handovers      = results[16] || [];
-    DB.supplier_batches    = results[18] || [];
-    DB.wholesale_batches   = results[19] || [];
-    // vehicle_catalog: flatten into vehicle_catalog dict
-    const vc = results[17] || [];
-    DB.vehicle_catalog = {};
-    vc.forEach(r => {
-      if (!DB.vehicle_catalog[r.make]) DB.vehicle_catalog[r.make] = [];
-      DB.vehicle_catalog[r.make].push(r.model);
-    });
-    DB_LOADED = true;
-    hideLoader();
-  } catch(e) {
-    hideLoader();
-    alert('Failed to load data: ' + e.message);
+  showLoader('Loading data…');
+  // Load each table independently so one failure never blocks others
+  async function load(table, query='') {
+    try { return await sbSelect(table, query); }
+    catch(e) { console.warn('Failed to load', table, ':', e.message); return []; }
   }
+  const [
+    products, variants, batches, stock_costs, sales,
+    collection_batches, wholesale_customers, suppliers,
+    supplier_payments, expenses, payments, purchases,
+    settings, fixed_assets, users, reservations,
+    cash_handovers, vc, supplier_batches, wholesale_batches
+  ] = await Promise.all([
+    load('products'), load('variants'), load('batches'), load('stock_costs'), load('sales'),
+    load('collection_batches'), load('wholesale_customers'), load('suppliers'),
+    load('supplier_payments'), load('expenses'), load('partner_payments'), load('purchases'),
+    load('settings'), load('fixed_assets'), load('app_users'), load('reservations'),
+    load('cash_handovers'), load('vehicle_catalog'),
+    load('supplier_batches'), load('wholesale_batches')
+  ]);
+  DB.products            = products            || [];
+  DB.variants            = variants            || [];
+  DB.batches             = batches             || [];
+  DB.stock_costs         = stock_costs         || [];
+  DB.sales               = sales               || [];
+  DB.collection_batches  = collection_batches  || [];
+  DB.wholesale_customers = wholesale_customers || [];
+  DB.suppliers           = suppliers           || [];
+  DB.supplier_payments   = supplier_payments   || [];
+  DB.expenses            = expenses            || [];
+  DB.payments            = payments            || [];
+  DB.purchases           = purchases           || [];
+  DB.settings            = settings            || [];
+  DB.fixed_assets        = fixed_assets        || [];
+  DB.users               = users               || [];
+  DB.reservations        = reservations        || [];
+  DB.cash_handovers      = cash_handovers      || [];
+  DB.supplier_batches    = supplier_batches    || [];
+  DB.wholesale_batches   = wholesale_batches   || [];
+  DB.vehicle_catalog = {};
+  (vc||[]).forEach(r => {
+    if (!DB.vehicle_catalog[r.make]) DB.vehicle_catalog[r.make] = [];
+    DB.vehicle_catalog[r.make].push(r.model);
+  });
+  DB_LOADED = true;
+  hideLoader();
+  console.log('✅ DB loaded:', {
+    sales: DB.sales.length, variants: DB.variants.length,
+    products: DB.products.length, reservations: DB.reservations.length
+  });
 }
 
 // Map payments table name (DB uses payments, Supabase uses partner_payments)
