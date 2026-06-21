@@ -958,173 +958,35 @@ let CURRENT_USER = null;
 function isAdmin(){return CURRENT_ROLE==="admin";}
 function isSales(){return CURRENT_ROLE==="sales";}
 
-
-// ═══ SECURE CONFIG ══════════════════════════════════════════════
+// ═══ SECURE CONFIG — Edge Functions only, no service key ═════════
 const SB_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVkb3B4Zmp6d3h5Y3RxZGJ6YWdyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE5NTMyMTQsImV4cCI6MjA5NzUyOTIxNH0.55wDddJZ6g5_jM-o8UhYb0yvJ2xMKKyZ-FzFFC7F0qI';
-const FN_BASE = 'https://edopxfjzwxyctqdbzagr.supabase.co/functions/v1';
 const SB_URL  = 'https://edopxfjzwxyctqdbzagr.supabase.co';
+const FN_BASE = 'https://edopxfjzwxyctqdbzagr.supabase.co/functions/v1';
 let SESSION_TOKEN = null;
 
-// ── Edge Function caller ─────────────────────────────────────────
+// ── Edge Function caller ──────────────────────────────────────────
 async function callFn(fnName, body, requireAuth) {
-  if(requireAuth===undefined)requireAuth=true;
+  if (requireAuth === undefined) requireAuth = true;
   const headers = {'Content-Type':'application/json','apikey':SB_ANON};
-  if(requireAuth && SESSION_TOKEN) headers['Authorization']='Bearer '+SESSION_TOKEN;
-  const res = await fetch(FN_BASE+'/'+fnName, {method:'POST',headers,body:JSON.stringify(body)});
-  if(!res.ok){const e=await res.json().catch(()=>({error:res.statusText}));throw new Error(e.error||res.statusText);}
+  if (requireAuth && SESSION_TOKEN) headers['Authorization'] = 'Bearer ' + SESSION_TOKEN;
+  const res = await fetch(FN_BASE + '/' + fnName, {
+    method: 'POST', headers, body: JSON.stringify(body)
+  });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({error: res.statusText}));
+    throw new Error(e.error || res.statusText);
+  }
   return res.json();
 }
 
-// ── DB: in-memory store ──────────────────────────────────────────
-let DB = {
-  products:[],variants:[],batches:[],stock_costs:[],sales:[],
-  collection_batches:[],wholesale_customers:[],suppliers:[],
-  supplier_payments:[],expenses:[],payments:[],purchases:[],
-  settings:[],fixed_assets:[],users:[],reservations:[],
-  cash_handovers:[],supplier_batches:[],wholesale_batches:[],vehicle_catalog:{}
-};
-let DB_LOADED = false;
-
-function showLoader(msg){
-  let el=document.getElementById('global-loader');
-  if(!el){el=document.createElement('div');el.id='global-loader';
-    el.style.cssText='position:fixed;inset:0;background:rgba(27,42,74,.7);z-index:99999;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;color:#fff;font-size:15px;font-weight:600';
-    el.innerHTML='<div style="width:40px;height:40px;border:4px solid rgba(255,255,255,.2);border-top-color:#C9993A;border-radius:50%;animation:spin 0.8s linear infinite"></div><div id="loader-msg"></div>';
-    document.body.appendChild(el);
-    const st=document.createElement('style');st.textContent='@keyframes spin{to{transform:rotate(360deg)}}';document.head.appendChild(st);}
-  document.getElementById('loader-msg').textContent=msg||'Loading…';el.style.display='flex';
-}
-function hideLoader(){const el=document.getElementById('global-loader');if(el)el.style.display='none';}
-
-async function loadAllData(){
-  showLoader('Loading data…');
-  try{
-    const data=await callFn('data-read',{});
-    DB.products=data.products||[];DB.variants=data.variants||[];DB.batches=data.batches||[];
-    DB.stock_costs=data.stock_costs||[];DB.sales=data.sales||[];
-    DB.collection_batches=data.collection_batches||[];DB.wholesale_customers=data.wholesale_customers||[];
-    DB.suppliers=data.suppliers||[];DB.supplier_payments=data.supplier_payments||[];
-    DB.expenses=data.expenses||[];DB.payments=data.partner_payments||[];DB.purchases=data.purchases||[];
-    DB.settings=data.settings||[];DB.fixed_assets=data.fixed_assets||[];DB.users=data.app_users||[];
-    DB.reservations=data.reservations||[];DB.cash_handovers=data.cash_handovers||[];
-    DB.supplier_batches=data.supplier_batches||[];DB.wholesale_batches=data.wholesale_batches||[];
-    DB.vehicle_catalog={};
-    (data.vehicle_catalog||[]).forEach(r=>{if(!DB.vehicle_catalog[r.make])DB.vehicle_catalog[r.make]=[];DB.vehicle_catalog[r.make].push(r.model);});
-    DB_LOADED=true;hideLoader();
-    console.log('DB loaded:',{sales:DB.sales.length,variants:DB.variants.length,reservations:DB.reservations.length});
-  }catch(e){hideLoader();alert('Failed to load data: '+e.message);}
-}
-
-// ── Secure write helpers ─────────────────────────────────────────
-async function dbInsert(table,row){
-  const sbTable=table==='payments'?'partner_payments':table==='users'?'app_users':table;
-  let sbRow={...row};
-  if(table==='expenses'&&sbRow.desc!==undefined){sbRow.description=sbRow.desc;delete sbRow.desc;}
-  const _df=['date','collection_date','payment_date','shipment_date','confirmed_at','datetime'];
-  for(const k of Object.keys(sbRow)){if((sbRow[k]===''||sbRow[k]===undefined)&&_df.includes(k))sbRow[k]=null;}
-  try{await callFn('data-write',{action:'insert',table:sbTable,row:sbRow});}
-  catch(e){console.warn('Insert failed:',table,e.message);}
-}
-
-async function dbUpdate(table,id,updates){
-  const sbTable=table==='payments'?'partner_payments':table==='users'?'app_users':table;
-  let u={...updates};
-  if(table==='expenses'&&u.desc!==undefined){u.description=u.desc;delete u.desc;}
-  const _df=['date','collection_date','payment_date','shipment_date','confirmed_at','datetime'];
-  for(const k of Object.keys(u)){if((u[k]===''||u[k]===undefined)&&_df.includes(k))u[k]=null;}
-  try{await callFn('data-write',{action:'update',table:sbTable,id,updates:u});}
-  catch(e){console.warn('Update failed:',table,e.message);}
-}
-
-async function dbDelete(table,id){
-  const sbTable=table==='users'?'app_users':table;
-  try{
-    await callFn('data-write',{action:'delete',table:sbTable,id});
-    if(DB[table])DB[table]=DB[table].filter(r=>r.id!==id);
-  }catch(e){console.warn('Delete failed:',table,e.message);}
-}
-
-function pushRow(table,row){dbInsert(table,row).catch(e=>console.warn('pushRow error:',e));}
-function gasCall(){return Promise.resolve({});}
-let GAS_URL='';
-
-function getSetting(k){const s=(DB.settings||[]).find(x=>x.key===k);return s?s.value:'';}
-function setSetting(k,v){
-  const s=(DB.settings||[]).find(x=>x.key===k);
-  if(s){s.value=v;dbUpdate('settings',k,{value:v}).catch(()=>{});}
-  else{DB.settings.push({key:k,value:v});dbInsert('settings',{key:k,value:v}).catch(()=>{});}
-}
-
-// ── Login ────────────────────────────────────────────────────────
-async function doLogin(){
-  const username=(document.getElementById('login-username').value||'').trim().toLowerCase();
-  const pin=document.getElementById('login-pin').value;
-  const errEl=document.getElementById('login-err');
-  if(!username){errEl.textContent='Enter username.';return;}
-  if(!pin){errEl.textContent='Enter password.';return;}
-  errEl.textContent='';showLoader('Signing in…');
-  try{
-    const res=await callFn('auth-login',{username,password:pin},false);
-    if(!res.token){hideLoader();errEl.textContent='❌ Incorrect username or password.';document.getElementById('login-pin').value='';return;}
-    SESSION_TOKEN=res.token;CURRENT_USER=res.user;CURRENT_ROLE=res.user.role;
-    sessionStorage.setItem(SK,JSON.stringify({token:res.token,user:res.user}));
-    await loadAllData();
-    document.getElementById('login-screen').style.display='none';
-    document.getElementById('app-shell').style.display='flex';
-    document.getElementById('login-pin').value='';document.getElementById('login-username').value='';
-    applyRoleRestrictions();populateSels();renderDash();
-  }catch(e){hideLoader();errEl.textContent='❌ '+e.message;}
-}
-
-async function checkSession(){
-  const s=sessionStorage.getItem(SK);
-  if(s){
-    try{
-      const sess=JSON.parse(s);SESSION_TOKEN=sess.token;CURRENT_USER=sess.user;CURRENT_ROLE=sess.user.role;
-      document.getElementById('login-screen').style.display='none';
-      document.getElementById('app-shell').style.display='flex';
-      await loadAllData();applyRoleRestrictions();populateSels();renderDash();return;
-    }catch(e){sessionStorage.removeItem(SK);}
-  }
-  document.getElementById('login-screen').style.display='flex';
-  setTimeout(()=>document.getElementById('login-pin')?.focus(),200);
-}
-
-function doLogout(){
-  sessionStorage.removeItem(SK);SESSION_TOKEN=null;CURRENT_ROLE='';CURRENT_USER=null;
-  document.getElementById('app-shell').style.display='none';
-  document.getElementById('login-screen').style.display='flex';
-  document.getElementById('login-pin').value='';document.getElementById('login-username').value='';
-}
-function logout(){doLogout();}
-
-async function savePins(){
-  const ap=document.getElementById('set-admin-pin')?.value;
-  const msg=document.getElementById('pin-msg');
-  if(!ap||ap.length<4){if(msg){msg.style.color='var(--rd)';msg.textContent='Min 4 characters.';}return;}
-  try{
-    await fetch(SB_URL+'/rest/v1/rpc/update_user_password',{method:'POST',
-      headers:{'apikey':SB_ANON,'Authorization':'Bearer '+SESSION_TOKEN,'Content-Type':'application/json'},
-      body:JSON.stringify({p_username:CURRENT_USER?.username,p_password:ap})});
-    if(msg){msg.style.color='var(--gn)';msg.textContent='✅ Password updated';}
-    document.getElementById('set-admin-pin').value='';
-    setTimeout(()=>{if(msg)msg.textContent='';},3000);
-  }catch(e){if(msg){msg.style.color='var(--rd)';msg.textContent='❌ '+e.message;}}
-}
-
-function uid(){return 'r'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
-
-document.addEventListener('DOMContentLoaded',()=>{checkSession();});
-
-
-// ── Compatibility: sbFetch routes through Edge Functions ─────────
-// All write operations go through data-write Edge Function
-// Read operations use anon key directly (RLS protects them)
-async function sbFetch(path, options={}, useService=false) {
-  // For RPC calls (login, password updates) - use anon key directly
+// ── Compatibility: sbFetch routes through session token ───────────
+async function sbFetch(path, options, useService) {
+  options = options || {};
+  const method = options.method || 'GET';
+  // RPC calls use session token
   if (path.includes('/rpc/')) {
     const res = await fetch(SB_URL + path, {
-      method: options.method || 'GET',
+      method: method,
       headers: {
         'apikey': SB_ANON,
         'Authorization': 'Bearer ' + (SESSION_TOKEN || SB_ANON),
@@ -1133,15 +995,13 @@ async function sbFetch(path, options={}, useService=false) {
       },
       body: options.body
     });
-    if(!res.ok){const e=await res.text();throw new Error(e);}
-    const ct=res.headers.get('content-type')||'';
-    if(ct.includes('json')&&res.status!==204)return res.json();
+    if (!res.ok) { const e = await res.text(); throw new Error(e); }
+    const ct = res.headers.get('content-type') || '';
+    if (ct.includes('json') && res.status !== 204) return res.json();
     return null;
   }
-  // For REST table operations - route through Edge Function
-  const method = options.method || 'GET';
-  if (method === 'GET' || method === undefined) {
-    // Read: use anon key (RLS allows products/variants for anon, rest requires session)
+  // REST table reads — use session token for authenticated access
+  if (method === 'GET') {
     const res = await fetch(SB_URL + path, {
       method: 'GET',
       headers: {
@@ -1150,25 +1010,21 @@ async function sbFetch(path, options={}, useService=false) {
         'Content-Type': 'application/json'
       }
     });
-    if(!res.ok){const e=await res.text();throw new Error(e);}
-    const ct=res.headers.get('content-type')||'';
-    if(ct.includes('json')&&res.status!==204)return res.json();
+    if (!res.ok) { const e = await res.text(); throw new Error(e); }
+    const ct = res.headers.get('content-type') || '';
+    if (ct.includes('json') && res.status !== 204) return res.json();
     return null;
   }
-  // Write: extract table and id from path and route to Edge Function
+  // REST table writes — route through Edge Function
   const tableMatch = path.match(/\/rest\/v1\/(\w+)/);
   const idMatch = path.match(/id=eq\.([^&]+)/);
   if (tableMatch) {
     const table = tableMatch[1];
     const id = idMatch ? idMatch[1] : null;
     const body = options.body ? JSON.parse(options.body) : {};
-    if (method === 'POST') {
-      return await callFn('data-write', {action:'insert', table, row:body});
-    } else if (method === 'PATCH') {
-      return await callFn('data-write', {action:'update', table, id, updates:body});
-    } else if (method === 'DELETE') {
-      return await callFn('data-write', {action:'delete', table, id});
-    }
+    if (method === 'POST')   return callFn('data-write', {action:'insert', table, row:body});
+    if (method === 'PATCH')  return callFn('data-write', {action:'update', table, id, updates:body});
+    if (method === 'DELETE') return callFn('data-write', {action:'delete', table, id});
   }
   return null;
 }
@@ -1185,6 +1041,455 @@ async function sbSelect(table, query, svc) {
   return sbFetch('/rest/v1/'+table+'?'+(query||'')+'&limit=10000', {}, svc);
 }
 
+// ── DB: in-memory store loaded from Edge Function ─────────────────
+let DB = {
+  products:[],variants:[],batches:[],stock_costs:[],sales:[],
+  collection_batches:[],wholesale_customers:[],suppliers:[],
+  supplier_payments:[],expenses:[],payments:[],purchases:[],
+  settings:[],fixed_assets:[],users:[],reservations:[],
+  cash_handovers:[],supplier_batches:[],wholesale_batches:[],vehicle_catalog:{}
+};
+let DB_LOADED = false;
+let GAS_URL = '';
+
+function showLoader(msg) {
+  let el = document.getElementById('global-loader');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'global-loader';
+    el.style.cssText = 'position:fixed;inset:0;background:rgba(27,42,74,.7);z-index:99999;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;color:#fff;font-size:15px;font-weight:600';
+    el.innerHTML = '<div style="width:40px;height:40px;border:4px solid rgba(255,255,255,.2);border-top-color:#C9993A;border-radius:50%;animation:spin 0.8s linear infinite"></div><div id="loader-msg"></div>';
+    document.body.appendChild(el);
+    const st = document.createElement('style');
+    st.textContent = '@keyframes spin{to{transform:rotate(360deg)}}';
+    document.head.appendChild(st);
+  }
+  document.getElementById('loader-msg').textContent = msg || 'Loading...';
+  el.style.display = 'flex';
+}
+function hideLoader() {
+  const el = document.getElementById('global-loader');
+  if (el) el.style.display = 'none';
+}
+
+// ── Load all data via Edge Function ──────────────────────────────
+async function loadAllData() {
+  showLoader('Loading data...');
+  try {
+    const data = await callFn('data-read', {});
+    DB.products            = data.products            || [];
+    DB.variants            = data.variants            || [];
+    DB.batches             = data.batches             || [];
+    DB.stock_costs         = data.stock_costs         || [];
+    DB.sales               = data.sales               || [];
+    DB.collection_batches  = data.collection_batches  || [];
+    DB.wholesale_customers = data.wholesale_customers || [];
+    DB.suppliers           = data.suppliers           || [];
+    DB.supplier_payments   = data.supplier_payments   || [];
+    DB.expenses            = data.expenses            || [];
+    DB.payments            = data.partner_payments    || [];
+    DB.purchases           = data.purchases           || [];
+    DB.settings            = data.settings            || [];
+    DB.fixed_assets        = data.fixed_assets        || [];
+    DB.users               = data.app_users           || [];
+    DB.reservations        = data.reservations        || [];
+    DB.cash_handovers      = data.cash_handovers      || [];
+    DB.supplier_batches    = data.supplier_batches    || [];
+    DB.wholesale_batches   = data.wholesale_batches   || [];
+    DB.vehicle_catalog = {};
+    (data.vehicle_catalog || []).forEach(r => {
+      if (!DB.vehicle_catalog[r.make]) DB.vehicle_catalog[r.make] = [];
+      DB.vehicle_catalog[r.make].push(r.model);
+    });
+    DB_LOADED = true;
+    hideLoader();
+    console.log('DB loaded:', {sales:DB.sales.length, variants:DB.variants.length, reservations:DB.reservations.length});
+  } catch(e) {
+    hideLoader();
+    alert('Failed to load data: ' + e.message);
+  }
+}
+
+// ── Stub for legacy GAS code ──────────────────────────────────────
+function gasCall() { return Promise.resolve({}); }
+
+// ── Write helpers ─────────────────────────────────────────────────
+async function dbInsert(table, row) {
+  const sbTable = table==='payments'?'partner_payments':table==='users'?'app_users':table;
+  let sbRow = {...row};
+  if (table==='expenses' && sbRow.desc!==undefined) { sbRow.description=sbRow.desc; delete sbRow.desc; }
+  const _df = ['date','collection_date','payment_date','shipment_date','confirmed_at','datetime'];
+  for (const k of Object.keys(sbRow)) {
+    if ((sbRow[k]===''||sbRow[k]===undefined) && _df.includes(k)) sbRow[k]=null;
+  }
+  try { await callFn('data-write', {action:'insert', table:sbTable, row:sbRow}); }
+  catch(e) { console.warn('Insert failed:', table, e.message); }
+}
+
+async function dbUpdate(table, id, updates) {
+  const sbTable = table==='payments'?'partner_payments':table==='users'?'app_users':table;
+  let u = {...updates};
+  if (table==='expenses' && u.desc!==undefined) { u.description=u.desc; delete u.desc; }
+  const _df = ['date','collection_date','payment_date','shipment_date','confirmed_at','datetime'];
+  for (const k of Object.keys(u)) {
+    if ((u[k]===''||u[k]===undefined) && _df.includes(k)) u[k]=null;
+  }
+  try { await callFn('data-write', {action:'update', table:sbTable, id, updates:u}); }
+  catch(e) { console.warn('Update failed:', table, e.message); }
+}
+
+async function dbDelete(table, id) {
+  const sbTable = table==='users'?'app_users':table;
+  try {
+    await callFn('data-write', {action:'delete', table:sbTable, id});
+    if (DB[table]) DB[table] = DB[table].filter(r => r.id !== id);
+  } catch(e) { console.warn('Delete failed:', table, e.message); }
+}
+
+function pushRow(table, row) {
+  dbInsert(table, row).catch(e => console.warn('pushRow error:', e));
+}
+
+function uid() { return 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
+
+function getSetting(k) {
+  const s = (DB.settings||[]).find(x=>x.key===k); return s?s.value:'';
+}
+function setSetting(k, v) {
+  const s = (DB.settings||[]).find(x=>x.key===k);
+  if(s){s.value=v; dbUpdate('settings',k,{value:v}).catch(()=>{});}
+  else {DB.settings.push({key:k,value:v}); dbInsert('settings',{key:k,value:v}).catch(()=>{});}
+}
+
+// ── ISO 27001 Password Policy ─────────────────────────────────────
+const PASSWORD_POLICY = {
+  minLength: 12,
+  requireUppercase: true,
+  requireLowercase: true,
+  requireNumbers: true,
+  requireSpecial: true,
+  maxFailedAttempts: 5,
+  lockoutMinutes: 15,
+  sessionTimeoutHours: 8
+};
+
+let failedAttempts = 0;
+let lockoutUntil = null;
+
+function validatePassword(pw) {
+  const errors = [];
+  if (pw.length < PASSWORD_POLICY.minLength)
+    errors.push('Minimum ' + PASSWORD_POLICY.minLength + ' characters');
+  if (PASSWORD_POLICY.requireUppercase && !/[A-Z]/.test(pw))
+    errors.push('At least one uppercase letter (A-Z)');
+  if (PASSWORD_POLICY.requireLowercase && !/[a-z]/.test(pw))
+    errors.push('At least one lowercase letter (a-z)');
+  if (PASSWORD_POLICY.requireNumbers && !/[0-9]/.test(pw))
+    errors.push('At least one number (0-9)');
+  if (PASSWORD_POLICY.requireSpecial && !/[^A-Za-z0-9]/.test(pw))
+    errors.push('At least one special character (!@#$%^&*)');
+  return errors;
+}
+
+function isLockedOut() {
+  if (!lockoutUntil) return false;
+  if (Date.now() > lockoutUntil) { lockoutUntil = null; failedAttempts = 0; return false; }
+  return true;
+}
+
+// ── Authentication ────────────────────────────────────────────────
+async function doLogin() {
+  const username = (document.getElementById('login-username').value||'').trim().toLowerCase();
+  const pin = document.getElementById('login-pin').value;
+  const errEl = document.getElementById('login-err');
+
+  if (isLockedOut()) {
+    const remaining = Math.ceil((lockoutUntil - Date.now()) / 60000);
+    errEl.textContent = 'Account locked. Try again in ' + remaining + ' minute(s).';
+    return;
+  }
+  if (!username) { errEl.textContent = 'Enter username.'; return; }
+  if (!pin) { errEl.textContent = 'Enter password.'; return; }
+  errEl.textContent = '';
+  showLoader('Signing in...');
+  try {
+    const res = await callFn('auth-login', {username, password:pin}, false);
+    if (!res || !res.token) {
+      hideLoader();
+      failedAttempts++;
+      const remaining = PASSWORD_POLICY.maxFailedAttempts - failedAttempts;
+      if (failedAttempts >= PASSWORD_POLICY.maxFailedAttempts) {
+        lockoutUntil = Date.now() + (PASSWORD_POLICY.lockoutMinutes * 60000);
+        errEl.textContent = 'Too many failed attempts. Account locked for ' + PASSWORD_POLICY.lockoutMinutes + ' minutes.';
+      } else {
+        errEl.textContent = 'Incorrect username or password. ' + remaining + ' attempt(s) remaining.';
+      }
+      document.getElementById('login-pin').value = '';
+      return;
+    }
+    failedAttempts = 0; lockoutUntil = null;
+    SESSION_TOKEN = res.token;
+    CURRENT_USER = res.user;
+    CURRENT_ROLE = res.user.role;
+
+    // Session timeout
+    const timeoutMs = PASSWORD_POLICY.sessionTimeoutHours * 3600000;
+    setTimeout(() => {
+      alert('Your session has expired for security reasons. Please log in again.');
+      doLogout();
+    }, timeoutMs);
+
+    sessionStorage.setItem(SK, JSON.stringify({token:res.token, user:res.user, loginTime:Date.now()}));
+    await loadAllData();
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app-shell').style.display = 'flex';
+    document.getElementById('login-pin').value = '';
+    document.getElementById('login-username').value = '';
+    applyRoleRestrictions();
+    populateSels();
+    renderDash();
+  } catch(e) {
+    hideLoader();
+    errEl.textContent = 'Login failed: ' + e.message;
+  }
+}
+
+async function checkSession() {
+  const s = sessionStorage.getItem(SK);
+  if (s) {
+    try {
+      const sess = JSON.parse(s);
+      // Check session age (ISO 27001: session timeout)
+      const sessionAge = (Date.now() - (sess.loginTime || 0)) / 3600000;
+      if (sessionAge > PASSWORD_POLICY.sessionTimeoutHours) {
+        sessionStorage.removeItem(SK);
+        document.getElementById('login-screen').style.display = 'flex';
+        return;
+      }
+      SESSION_TOKEN = sess.token;
+      CURRENT_USER = sess.user;
+      CURRENT_ROLE = sess.user.role;
+      document.getElementById('login-screen').style.display = 'none';
+      document.getElementById('app-shell').style.display = 'flex';
+      await loadAllData();
+      applyRoleRestrictions();
+      populateSels();
+      renderDash();
+      return;
+    } catch(e) { sessionStorage.removeItem(SK); }
+  }
+  document.getElementById('login-screen').style.display = 'flex';
+  setTimeout(() => document.getElementById('login-pin')?.focus(), 200);
+}
+
+function doLogout() {
+  sessionStorage.removeItem(SK);
+  SESSION_TOKEN = null; CURRENT_ROLE = ''; CURRENT_USER = null;
+  document.getElementById('app-shell').style.display = 'none';
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('login-pin').value = '';
+  document.getElementById('login-username').value = '';
+}
+function logout() { doLogout(); }
+
+async function savePins() {
+  const ap = document.getElementById('set-admin-pin')?.value;
+  const msg = document.getElementById('pin-msg');
+  if (!ap) { if(msg){msg.style.color='var(--rd)';msg.textContent='Enter new password.';} return; }
+  const errors = validatePassword(ap);
+  if (errors.length > 0) {
+    if(msg){msg.style.color='var(--rd)';msg.textContent='Password requirements: ' + errors.join(', ');}
+    return;
+  }
+  try {
+    await sbFetch('/rest/v1/rpc/update_user_password', {
+      method:'POST',
+      body:JSON.stringify({p_username:CURRENT_USER?.username, p_password:ap})
+    });
+    if(msg){msg.style.color='var(--gn)';msg.textContent='Password updated successfully.';}
+    document.getElementById('set-admin-pin').value = '';
+    setTimeout(() => { if(msg) msg.textContent=''; }, 4000);
+  } catch(e) {
+    if(msg){msg.style.color='var(--rd)';msg.textContent='Error: '+e.message;}
+  }
+}
+
+async function saveUser() {
+  const uname = (document.getElementById('user-username').value||'').trim().toLowerCase();
+  const dname = document.getElementById('user-display').value.trim();
+  const pin = document.getElementById('user-pin').value;
+  const active = document.getElementById('user-active').value === 'true';
+  const editId = document.getElementById('user-edit-id').value;
+  if (!uname) { alert('Enter username.'); return; }
+  if (!editId && !pin) { alert('Enter password for new user.'); return; }
+  if (pin) {
+    const errors = validatePassword(pin);
+    if (errors.length > 0) { alert('Password requirements not met:\n- ' + errors.join('\n- ')); return; }
+  }
+  const existing = (DB.users||[]).find(u=>u.username===uname&&u.id!==editId);
+  if (existing) { alert('Username already exists.'); return; }
+  showLoader('Saving...');
+  try {
+    if (editId) {
+      await sbFetch('/rest/v1/app_users?id=eq.'+editId, {
+        method:'PATCH', body:JSON.stringify({username:uname,display_name:dname,active})
+      });
+      if (pin) await sbFetch('/rest/v1/rpc/update_user_password', {
+        method:'POST', body:JSON.stringify({p_username:uname,p_password:pin})
+      });
+      const u=(DB.users||[]).find(x=>x.id===editId);
+      if(u){u.username=uname;u.display_name=dname;u.active=active;}
+    } else {
+      const res = await sbFetch('/rest/v1/rpc/create_user', {
+        method:'POST',
+        body:JSON.stringify({p_username:uname,p_display_name:dname,p_password:pin,p_role:'sales'})
+      });
+      const newUser = {id:res?.user_id||uid(),username:uname,display_name:dname,role:'sales',active};
+      DB.users = DB.users || [];
+      DB.users.push(newUser);
+    }
+    hideLoader();
+    closeM('m-adduser'); renderSetupUsers();
+  } catch(e) { hideLoader(); alert('Error: '+e.message); }
+}
+
+async function deleteUser(id) {
+  if (!confirm('Delete this user? This cannot be undone.')) return;
+  await dbDelete('users', id);
+  renderSetupUsers();
+}
+
+document.addEventListener('DOMContentLoaded', () => { checkSession(); });
+
+const tod=()=>new Date().toISOString().split('T')[0];
+const nisF=n=>'₪'+(+n||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
+const usdF=n=>'$'+(+n||0).toFixed(2);
+const pctF=n=>((+n||0)*100).toFixed(1)+'%';
+const dF=d=>{if(!d)return'';try{return new Date(d+'T12:00:00').toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})}catch(e){return d}};
+const isRet=s=>s.is_return===true||s.is_return==='TRUE';
+const isColl=p=>{const l=(p||'').toLowerCase();return l.includes('collect')||l==='paid'||l==='cash';};
+const gP=id=>DB.products.find(x=>x.id===id)||null;
+const gV=id=>DB.variants.find(x=>x.id===id)||null;
+const gWC=id=>DB.wholesale_customers.find(x=>x.id===id)||null;
+const pN=id=>{const p=gP(id);return p?p.name:'—';};
+const vLabel=v=>{if(!v)return'—';if(v.car_make&&v.car_model)return`${v.car_make} ${v.car_model} ${v.year_from?v.year_from:''}${v.year_to&&v.year_to<2099?'–'+v.year_to:v.year_to>=2099?'+':''}${v.set_type?' · '+v.set_type:''}`.trim();return v.set_type&&v.set_type!=='N/A'?v.set_type:pN(v.product_id)||'Base';};
+
+// ═══ FIFO ENGINE (variant-level) ════════════════════════════
+function getActiveBatches(variantId){
+  return DB.batches.filter(b=>b.variant_id===variantId&&b.status==='Active'&&(+b.qty_remaining||0)>0)
+    .sort((a,b)=>String(a.shipment_date).localeCompare(String(b.shipment_date)));
+}
+function getStock(variantId){
+  return DB.batches.filter(b=>b.variant_id===variantId&&b.status==='Active')
+    .reduce((a,b)=>a+(+b.qty_remaining||0),0);
+}
+function getFifoCost(variantId){
+  const b=getActiveBatches(variantId)[0];return b?(+b.unit_cost_nis||0):0;
+}
+async function fifoDeduct(variantId,qty){
+  const avail=getStock(variantId);
+  if(avail<=0)return 0;
+  const actualQty=Math.min(qty,avail);
+  let rem=actualQty,tot=0;
+  const batchUpdates=[];
+  for(const b of getActiveBatches(variantId)){
+    if(rem<=0)break;
+    const take=Math.min(rem,+b.qty_remaining||0);
+    tot+=take*(+b.unit_cost_nis||0);
+    b.qty_remaining=(+b.qty_remaining||0)-take;
+    if((+b.qty_remaining||0)<=0)b.status='Depleted';
+    rem-=take;
+    batchUpdates.push(dbUpdate('batches', b.id, {qty_remaining:b.qty_remaining, status:b.status}));
+  }
+  await Promise.all(batchUpdates);
+  const newStock=getStock(variantId);
+  const vv=gV(variantId);
+  if(vv){vv.stock_qty=newStock;await dbUpdate('variants',variantId,{stock_qty:newStock});}
+  return actualQty>0?tot/actualQty:0;
+}
+async function fifoRestore(variantId,qty){
+  const b=DB.batches.filter(x=>x.variant_id===variantId&&(x.status==='Active'||x.status==='Depleted'))
+    .sort((a,b)=>String(b.shipment_date).localeCompare(String(a.shipment_date)))[0];
+  if(b){
+    b.qty_remaining=(+b.qty_remaining||0)+qty;
+    b.status='Active';
+    await dbUpdate('batches', b.id, {qty_remaining:b.qty_remaining, status:'Active'});
+    const newStock=getStock(variantId);
+    const v=gV(variantId);
+    if(v){v.stock_qty=newStock;await dbUpdate('variants',variantId,{stock_qty:newStock});}
+  }
+}
+function recalcBatch(batchId){
+  const b=DB.batches.find(x=>x.id===batchId);if(!b)return;
+  const costs=DB.stock_costs.filter(c=>c.batch_id===batchId);
+  b.total_cost_nis=costs.reduce((a,c)=>a+(+c.amount_nis||0),0);
+  b.total_cost_usd=costs.reduce((a,c)=>a+(+c.amount_usd||0),0);
+  b.unit_cost_nis=+b.qty_received>0?+(b.total_cost_nis/+b.qty_received).toFixed(4):0;
+  dbUpdate('batches', b.id, b);
+}
+
+// ═══ VEHICLE LOOKUP ══════════════════════════════════════════
+// Only show makes/models that exist in variants table
+function getMakesForProduct(pid){
+  return[...new Set(DB.variants.filter(v=>v.product_id===pid&&v.car_make).map(v=>v.car_make))].sort();
+}
+function getModelsForProductMake(pid,make){
+  return[...new Set(DB.variants.filter(v=>v.product_id===pid&&v.car_make===make&&v.car_model).map(v=>v.car_model))].sort();
+}
+function getAllMakes(){
+  return[...new Set(DB.variants.filter(v=>v.car_make).map(v=>v.car_make))].sort();
+}
+function getModelsForMake(make){
+  return[...new Set(DB.variants.filter(v=>v.car_make===make&&v.car_model).map(v=>v.car_model))].sort();
+}
+function getCompatibleVariants(make,model,year){
+  return DB.variants.filter(v=>{
+    if(v.car_make!==make||v.car_model!==model)return false;
+    if(year&&+year>0){if(+year<+v.year_from||+year>+v.year_to)return false;}
+    return true;
+  });
+}
+
+// ═══ WHOLESALE CREDIT ═══════════════════════════════════════
+function getWCBal(cid){
+  const s=DB.sales.filter(x=>x.customer_id===cid&&!isRet(x));
+  return s.reduce((a,x)=>a+(+x.unit_price||0)*(+x.qty||1),0)-
+         s.filter(x=>isColl(x.payment_status)).reduce((a,x)=>a+(+x.unit_price||0)*(+x.qty||1),0);
+}
+function getWCOverdue(cid){
+  const wc=gWC(cid);if(!wc)return 0;
+  const cut=new Date();cut.setDate(cut.getDate()-(+wc.credit_days||30));
+  return DB.sales.filter(s=>s.customer_id===cid&&!isRet(s)&&!isColl(s.payment_status)&&new Date(s.date)<cut)
+    .reduce((a,s)=>a+(+s.unit_price||0)*(+s.qty||1),0);
+}
+
+// ═══ SUPABASE LAYER ACTIVE (GAS removed) ══════════════════
+// ═══ TABLE HELPERS ═══════════════════════════════════════════
+function tbl(rows,actions=false){
+  if(!rows||!rows.length)return'<div style="padding:18px;text-align:center;color:var(--mu);font-size:12px">No data</div>';
+  const cols=Object.keys(rows[0]).filter(c=>!c.startsWith('_'));
+  const hasA=actions&&rows[0]._actions!==undefined;
+  return`<div style="overflow-x:auto"><table><thead><tr>${cols.map(c=>`<th>${c}</th>`).join('')}${hasA?'<th></th>':''}</tr></thead><tbody>${
+    rows.map(r=>`<tr>${cols.map(c=>`<td>${r[c]??''}</td>`).join('')}${hasA?`<td style="white-space:nowrap">${r._actions}</td>`:''}</tr>`).join('')
+  }</tbody></table></div>`;
+}
+function pBadge(p){
+  const l=(p||'').toLowerCase();
+  if(l.includes('collect'))return'<span class="b bg">Collected</span>';
+  if(l==='paid')return'<span class="b bg">Paid</span>';
+  if(l==='cash')return'<span class="b bb">Cash</span>';
+  if(l==='returned')return'<span class="b br">Returned</span>';
+  if(l==='pending')return'<span class="b bo">Pending</span>';
+  return`<span class="b bx">${p||'—'}</span>`;
+}
+function ptBadge(t){
+  if(t==='Cash')return'<span class="b bb">Cash</span>';
+  if(t==='COD')return'<span class="b bo">COD</span>';
+  if(t==='Credit')return'<span class="b bp">Credit</span>';
+  return t?`<span class="b bx">${t}</span>`:'';
+}
+
+// ═══ NAVIGATION ══════════════════════════════════════════════
 function nav(page){
   document.querySelectorAll('.pg').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.ni').forEach(n=>n.classList.remove('active'));
