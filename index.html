@@ -971,26 +971,28 @@ async function loadAllData() {
       'collection_batches','wholesale_customers','suppliers',
       'supplier_payments','expenses','partner_payments','purchases',
       'settings','fixed_assets','app_users','reservations',
-      'cash_handovers','vehicle_catalog'
+      'cash_handovers','vehicle_catalog','supplier_batches','wholesale_batches'
     ];
     const results = await Promise.all(tables.map(t => sbSelect(t)));
-    DB.products       = results[0]  || [];
-    DB.variants       = results[1]  || [];
-    DB.batches        = results[2]  || [];
-    DB.stock_costs    = results[3]  || [];
-    DB.sales          = results[4]  || [];
-    DB.collection_batches = results[5] || [];
-    DB.wholesale_customers = results[6] || [];
-    DB.suppliers      = results[7]  || [];
-    DB.supplier_payments = results[8] || [];
-    DB.expenses       = results[9]  || [];
-    DB.payments       = results[10] || [];
-    DB.purchases      = results[11] || [];
-    DB.settings       = results[12] || [];
-    DB.fixed_assets   = results[13] || [];
-    DB.users          = results[14] || [];
-    DB.reservations   = results[15] || [];
-    DB.cash_handovers = results[16] || [];
+    DB.products            = results[0]  || [];
+    DB.variants            = results[1]  || [];
+    DB.batches             = results[2]  || [];
+    DB.stock_costs         = results[3]  || [];
+    DB.sales               = results[4]  || [];
+    DB.collection_batches  = results[5]  || [];
+    DB.wholesale_customers = results[6]  || [];
+    DB.suppliers           = results[7]  || [];
+    DB.supplier_payments   = results[8]  || [];
+    DB.expenses            = results[9]  || [];
+    DB.payments            = results[10] || [];
+    DB.purchases           = results[11] || [];
+    DB.settings            = results[12] || [];
+    DB.fixed_assets        = results[13] || [];
+    DB.users               = results[14] || [];
+    DB.reservations        = results[15] || [];
+    DB.cash_handovers      = results[16] || [];
+    DB.supplier_batches    = results[18] || [];
+    DB.wholesale_batches   = results[19] || [];
     // vehicle_catalog: flatten into vehicle_catalog dict
     const vc = results[17] || [];
     DB.vehicle_catalog = {};
@@ -2974,7 +2976,7 @@ function onSupBatchSupChange(){
   const bal=getSupBal(id);
   el.innerHTML=`Outstanding balance: <strong style="color:${bal>0?'var(--rd)':'var(--gn)'}">${nisF(bal)}</strong>`;
 }
-function saveSupBatch(){
+async function saveSupBatch(){
   const name=document.getElementById('sup-batch-name').value.trim();
   const supId=document.getElementById('sup-batch-sup-id').value;
   if(!name){alert('Enter batch name.');return;}
@@ -2990,8 +2992,10 @@ function saveSupBatch(){
   if(editId){
     const idx=DB.supplier_batches.findIndex(x=>x.id===editId);
     if(idx>=0)DB.supplier_batches[idx]={...DB.supplier_batches[idx],...row};
+    await dbUpdate('supplier_batches', editId, row);
   } else {
     DB.supplier_batches.push(row);
+    await dbInsert('supplier_batches', row);
   }
   closeM('m-sup-batch');renderSupBatches();
 }
@@ -3774,26 +3778,70 @@ function editUser(id){
 // ════ CASH HANDOVER ═══════════════════════════════════════════════════
 
 function renderHandover(){
-  // Calculate what this sales person collected in cash (unsubmitted)
   const username=CURRENT_USER?.display_name||CURRENT_USER?.username||'You';
-  const lastHandover=[...(DB.cash_handovers||[])].filter(h=>h.user_id===CURRENT_USER?.id).sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))).slice(0,1)[0];
-  const lastDate=lastHandover?.datetime||'';
-  // Cash sales since last handover
-  // Cash sales + COD collections (both types the salesperson physically handles)
-  const cashSales=DB.sales.filter(s=>!isRet(s)&&s.payment_type==='Cash'&&isColl(s.payment_status)&&(!lastDate||String(s.date)>=lastDate.split('T')[0]));
-  const codCollected=DB.sales.filter(s=>!isRet(s)&&s.payment_type==='COD'&&isColl(s.payment_status)&&(!lastDate||String(s.collection_date||s.date)>=lastDate.split('T')[0]));
-  const expected=cashSales.reduce((a,s)=>a+(+s.unit_price||0)*(+s.qty||1),0)+codCollected.reduce((a,s)=>a+(+s.unit_price||0)*(+s.qty||1),0);
-  const summaryEl=document.getElementById('handover-summary-box');
-  if(summaryEl){
-    summaryEl.innerHTML=`<strong>${username}</strong> — Cash sales since last handover: <strong class="apos">${nisF(expected)}</strong> (${cashSales.length} sales)`;
-    summaryEl.style.display=expected>0?'block':'none';
+  // Show summary box only to sales persons
+  if(!isAdmin()){
+    const lastHandover=[...(DB.cash_handovers||[])].filter(h=>h.user_id===CURRENT_USER?.id)
+      .sort((a,b)=>String(b.datetime||'').localeCompare(String(a.datetime||''))).slice(0,1)[0];
+    const lastDate=lastHandover?.datetime||'';
+    const cashSales=DB.sales.filter(s=>!isRet(s)&&s.payment_type==='Cash'&&isColl(s.payment_status)&&(!lastDate||String(s.date)>=lastDate.split('T')[0]));
+    const codCollected=DB.sales.filter(s=>!isRet(s)&&s.payment_type==='COD'&&isColl(s.payment_status)&&(!lastDate||String(s.collection_date||s.date)>=lastDate.split('T')[0]));
+    const expected=cashSales.reduce((a,s)=>a+(+s.unit_price||0)*(+s.qty||1),0)+codCollected.reduce((a,s)=>a+(+s.unit_price||0)*(+s.qty||1),0);
+    const summaryEl=document.getElementById('handover-summary-box');
+    if(summaryEl){
+      summaryEl.innerHTML=`<strong>${username}</strong> — Cash to hand over: <strong class="apos">${nisF(expected)}</strong> (${cashSales.length} cash + ${codCollected.length} COD sales)`;
+      summaryEl.style.display='block';
+    }
+  } else {
+    // Admin: show pending count badge
+    const pending=(DB.cash_handovers||[]).filter(h=>!h.confirmed).length;
+    const summaryEl=document.getElementById('handover-summary-box');
+    if(summaryEl){
+      summaryEl.innerHTML=pending>0
+        ?`<strong>⚠️ ${pending} pending handover${pending>1?'s':''} awaiting your confirmation.</strong>`
+        :`<span style="color:var(--gn)">✅ All handovers confirmed.</span>`;
+      summaryEl.style.display='block';
+    }
   }
-  // History
-  const history=[...(DB.cash_handovers||[])].sort((a,b)=>String(b.datetime||'').localeCompare(String(a.datetime||'')));
-  document.getElementById('handover-tbl').innerHTML=history.length?tbl(history.map(h=>{
-    const user=(DB.users||[]).find(u=>u.id===h.user_id);
-    return{'Date':h.datetime?dF(h.datetime.split('T')[0]):'—','Sales Person':user?.display_name||h.username||'—','Amount':nisF(+h.amount||0),'Expected (Cash+COD)':nisF(+h.expected||0),'Diff':h.amount-(h.expected||0)>=0?`<span class="apos">+${nisF(h.amount-(h.expected||0))}</span>`:`<span class="aneg">${nisF(h.amount-(h.expected||0))}</span>`,'Status':`<span class="b ${h.confirmed?'bg':'bo'}">${h.confirmed?'Confirmed':'Pending'}</span>`,'Notes':h.notes||'—'};
-  }),false):'<div style="padding:14px;text-align:center;color:var(--mu);font-size:12px">No handovers recorded yet.</div>';
+  // History — admin sees all, sales sees only their own
+  const allHandovers=[...(DB.cash_handovers||[])].sort((a,b)=>String(b.datetime||'').localeCompare(String(a.datetime||'')));
+  const history=isAdmin()?allHandovers:allHandovers.filter(h=>h.user_id===CURRENT_USER?.id);
+  const el=document.getElementById('handover-tbl');
+  if(!history.length){el.innerHTML='<div style="padding:14px;text-align:center;color:var(--mu);font-size:12px">No handovers recorded yet.</div>';return;}
+  el.innerHTML=`<div style="overflow-x:auto"><table>
+    <thead><tr><th>Date & Time</th><th>Sales Person</th><th>Amount</th><th>Expected</th><th>Diff</th><th>Notes</th><th>Status</th>${isAdmin()?'<th>Action</th>':''}</tr></thead>
+    <tbody>${history.map(h=>{
+      const diff=(+h.amount||0)-(+h.expected||0);
+      const diffStr=diff>=0?`<span class="apos">+${nisF(diff)}</span>`:`<span class="aneg">${nisF(diff)}</span>`;
+      const statusBadge=h.confirmed
+        ?`<span class="b bg">✅ Confirmed${h.confirmed_by?' by '+h.confirmed_by:''}</span>`
+        :`<span class="b bo">⏳ Pending</span>`;
+      const actionBtn=isAdmin()&&!h.confirmed
+        ?`<button class="btn btn-p btn-sm" onclick="confirmHandover('${h.id}')">Confirm</button>`
+        :(isAdmin()&&h.confirmed?`<span style="font-size:11px;color:var(--mu)">${h.confirmed_at?dF(h.confirmed_at.split('T')[0]):'—'}</span>`:'');
+      return`<tr>
+        <td style="font-size:11px">${h.datetime?new Date(h.datetime).toLocaleString('en-GB',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'—'}</td>
+        <td>${h.username||'—'}</td>
+        <td style="font-weight:700">${nisF(+h.amount||0)}</td>
+        <td>${nisF(+h.expected||0)}</td>
+        <td>${diffStr}</td>
+        <td style="font-size:11px">${h.notes||'—'}</td>
+        <td>${statusBadge}</td>
+        ${isAdmin()?`<td>${actionBtn}</td>`:''}
+      </tr>`;
+    }).join('')}
+    </tbody></table></div>`;
+}
+
+async function confirmHandover(id){
+  if(!confirm('Confirm receipt of this cash handover?'))return;
+  const h=(DB.cash_handovers||[]).find(x=>x.id===id);if(!h)return;
+  h.confirmed=true;
+  h.confirmed_by=CURRENT_USER?.display_name||CURRENT_USER?.username;
+  h.confirmed_at=new Date().toISOString();
+  await dbUpdate('cash_handovers',id,{confirmed:true,confirmed_by:h.confirmed_by,confirmed_at:h.confirmed_at});
+  renderHandover();
+  alert('✅ Handover confirmed.');
 }
 
 function openHandoverModal(){
