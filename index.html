@@ -327,6 +327,11 @@ tr:hover td{background:rgba(245,246,250,.7)}
 
 <!-- WHOLESALE CUSTOMERS -->
 <div id="pg-wholesale" class="pg">
+  <!-- Pending Orders Panel -->
+  <div id="whl-res-section" style="background:#fff;border-radius:10px;padding:18px 20px;margin-bottom:16px;border-left:4px solid var(--or);box-shadow:0 1px 3px rgba(0,0,0,.08)">
+    <div style="font-size:14px;font-weight:700;color:var(--nv);margin-bottom:12px">📋 Pending Wholesale Orders</div>
+    <div id="whl-res-tbl"></div>
+  </div>
   <div class="ph">
     <div><div class="pt">Wholesale Customers</div><div class="ps">Credit accounts · Limits · Statements</div></div>
     <div class="ph-acts">
@@ -335,10 +340,7 @@ tr:hover td{background:rgba(245,246,250,.7)}
     </div>
   </div>
   <div id="wc-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(285px,1fr));gap:12px;margin-bottom:18px"></div>
-  <div id="whl-res-section" style="margin-bottom:16px">
-    <div class="tct" style="font-size:13px;font-weight:600;margin-bottom:8px;color:var(--nv)">📋 Pending Reservations</div>
-    <div id="whl-res-tbl"></div>
-  </div>
+
   <div class="tc">
     <div class="tch">
       <div class="tct">Statement of Account</div>
@@ -4008,54 +4010,75 @@ function showWhlTab(tab){
   }
 }
 function renderReservations(){
-  const pending=(DB.reservations||[]).filter(r=>r.status==='Pending').sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
+  const pending=(DB.reservations||[]).filter(function(r){return r.status==='Pending';}).sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
   // Update badge
   const badge=document.getElementById('res-badge');
   if(badge){badge.textContent=pending.length;badge.style.display=pending.length?'inline':'none';}
   const el=document.getElementById('whl-res-tbl');if(!el)return;
-  const all=(DB.reservations||[]).sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
-  if(!all.length){el.innerHTML='<div style="padding:14px;text-align:center;color:var(--mu);font-size:12px">No reservations yet.</div>';return;}
-  el.innerHTML=`<div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Customer</th><th>Product</th><th>Variant</th><th>Qty</th><th>Price</th><th>Status</th><th></th></tr></thead><tbody>
-    ${all.map(r=>{
-      const wc=(DB.wholesale_customers||[]).find(c=>c.id===r.customer_id);
+  if(!pending.length){
+    el.innerHTML='<div style="padding:14px;text-align:center;color:var(--mu);font-size:12px">No pending orders.</div>';
+    return;
+  }
+  el.innerHTML='<div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Customer</th><th>Product</th><th>Qty</th><th>Price</th><th>Credit Status</th><th>Action</th></tr></thead><tbody>'+
+    pending.map(function(r){
+      const wc=(DB.wholesale_customers||[]).find(function(c){return c.id===r.customer_id;});
       const v=gV(r.variant_id);const p=gP(r.product_id);
       const price=(+v?.wholesale||0)*(1-(+(wc?.discount_pct||0))/100);
-      return`<tr>
-        <td>${dF(r.date)}</td>
-        <td><strong>${wc?.name||r.customer_name||'—'}</strong></td>
-        <td>${p?.name||'—'}</td><td>${v?vLabel(v):'—'}</td>
-        <td>${r.qty||1}</td>
-        <td>${nisF(price*(+r.qty||1))}</td>
-        <td><span class="b ${r.status==='Pending'?'bo':r.status==='Approved'?'bg':'br'}">${r.status}</span></td>
-        <td style="white-space:nowrap">
-          ${r.status==='Pending'&&isAdmin()?`<button class="btn btn-p btn-sm" onclick="approveReservation('${r.id}')">✅ Approve</button>
-          <button class="btn btn-d btn-sm" onclick="rejectReservation('${r.id}')">✕ Reject</button>`:''}
-        </td>
-      </tr>`;
-    }).join('')}
-  </tbody></table></div>`;
+      const orderTotal=price*(+r.qty||1);
+      const outstanding=(DB.sales||[]).filter(function(s){return s.customer_id===r.customer_id&&!s.is_return&&s.payment_status!=='Collected'&&s.payment_status!=='Paid';}).reduce(function(a,s){return a+(+s.unit_price||0)*(+s.qty||1);},0);
+      const creditLimit=+(wc?.credit_limit_nis||0);
+      const wouldExceed=creditLimit>0&&(outstanding+orderTotal)>creditLimit;
+      const creditBadge=wouldExceed
+        ?'<span class="b br" title="Outstanding: '+nisF(outstanding)+' + Order: '+nisF(orderTotal)+' > Limit: '+nisF(creditLimit)+'">⚠️ Exceeds Credit</span>'
+        :(creditLimit>0?'<span class="b bg">Within Limit</span>':'<span class="b bo">No Limit Set</span>');
+      const notes=r.notes?('<br><span style="font-size:10px;color:var(--mu)">'+r.notes+'</span>'):'';
+      return '<tr>'
+        +'<td>'+dF(r.date)+'</td>'
+        +'<td><strong>'+(wc?.name||r.customer_name||'—')+'</strong>'+notes+'</td>'
+        +'<td>'+(p?.name||'—')+' '+(v?vLabel(v):'')+'</td>'
+        +'<td>'+r.qty+'</td>'
+        +'<td>'+nisF(orderTotal)+'</td>'
+        +'<td>'+creditBadge+'</td>'
+        +'<td style="white-space:nowrap">'
+        +(wouldExceed
+          ?'<span style="font-size:11px;color:var(--rd)">Cannot approve</span>'
+          :('<button class="btn btn-p btn-sm" data-rid="'+r.id+'" onclick="approveReservation(this.dataset.rid)">Approve</button> '
+          +'<button class="btn btn-d btn-sm" data-rid="'+r.id+'" onclick="rejectReservation(this.dataset.rid)">Reject</button>'))
+        +'</td>'
+        +'</tr>';
+    }).join('')
+    +'</tbody></table></div>';
 }
-function approveReservation(id){
+async function approveReservation(id){
   const r=(DB.reservations||[]).find(x=>x.id===id);if(!r)return;
   const wc=(DB.wholesale_customers||[]).find(c=>c.id===r.customer_id);
   const v=gV(r.variant_id);if(!v){alert('Variant not found.');return;}
-  if(!confirm(`Approve reservation for ${wc?.name||'customer'}?\nThis will create a wholesale sale.`))return;
-  // Create wholesale sale
+  // Credit check
   const price=(+v.wholesale||0)*(1-(+(wc?.discount_pct||0))/100);
+  const orderTotal=price*(+r.qty||1);
+  const outstanding=(DB.sales||[]).filter(s=>s.customer_id===r.customer_id&&!s.is_return&&s.payment_status!=='Collected'&&s.payment_status!=='Paid').reduce((a,s)=>a+(+s.unit_price||0)*(+s.qty||1),0);
+  const creditLimit=+(wc?.credit_limit_nis||0);
+  if(creditLimit>0&&(outstanding+orderTotal)>creditLimit){
+    const over=nisF(outstanding+orderTotal-creditLimit);
+    alert('Cannot approve: order would exceed credit limit by '+over+'. Outstanding: '+nisF(outstanding)+' Order: '+nisF(orderTotal)+' Limit: '+nisF(creditLimit));
+    return;
+  }
+  if(!confirm('Approve order for '+(wc?.name||'customer')+'? Order total: '+nisF(orderTotal)+'. This will create a wholesale sale.'))return;
   const fifoUnit=fifoDeduct(r.variant_id,+r.qty||1);
   const p=gP(v.product_id);
   const sale={id:uid(),date:tod(),customer_id:r.customer_id,customer_name:wc?.name||'',
     product_id:v.product_id,product_name:p?.name||'',variant_id:r.variant_id,variant_label:vLabel(v),
     batch_id:getActiveBatches(r.variant_id)[0]?.id||'',qty:+r.qty||1,unit_price:price,
     unit_cost_nis:+fifoUnit.toFixed(4),discount_pct:+(wc?.discount_pct||0),payment_type:'Credit',
-    payment_status:'Pending',collection_batch_id:'',collection_date:'',sale_type:'Wholesale',
-    car_make:v.car_make||'',car_model:v.car_model||'',year_from:v.year_from||'',year_to:v.year_to||'',
-    set_type:v.set_type||'',remark:'From reservation '+id,gp_nis:+((price-fifoUnit)*(+r.qty||1)).toFixed(2),is_return:false};
-  DB.sales.push(sale);pushRow('sales',sale);
+    payment_status:'Pending',collection_batch_id:'',collection_date:null,sale_type:'Wholesale',
+    car_make:v.car_make||'',car_model:v.car_model||'',year_from:v.year_from||null,year_to:v.year_to||null,
+    set_type:v.set_type||'',remark:'Reservation #'+id,gp_nis:+((price-fifoUnit)*(+r.qty||1)).toFixed(2),is_return:false};
+  DB.sales.push(sale);
+  await dbInsert('sales', sale);
   r.status='Approved';r.sale_id=sale.id;
-  dbUpdate('reservations', r.id, r);
+  await dbUpdate('reservations', r.id, {status:'Approved', sale_id:sale.id});
   renderReservations();renderSales();renderDash();
-  alert('✅ Reservation approved and sale created.');
+  alert('Sale created successfully.');
 }
 function rejectReservation(id){
   const r=(DB.reservations||[]).find(x=>x.id===id);if(!r)return;
