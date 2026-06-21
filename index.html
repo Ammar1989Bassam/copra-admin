@@ -196,7 +196,7 @@ tr:hover td{background:rgba(245,246,250,.7)}
   <div class="ni" data-page="inventory" onclick="nav('inventory')"><span class="ic">📦</span> Inventory</div>
   <div class="ni admin-only" data-page="purchases" onclick="nav('purchases')"><span class="ic">🛒</span> Local Purchases</div>
   <div class="sg">Customers</div>
-  <div class="ni admin-only" data-page="wholesale" onclick="nav('wholesale')"><span class="ic">🏭</span> Wholesale Customers</div>
+  <div class="ni" data-page="wholesale" onclick="nav('wholesale')"><span class="ic">🏭</span> Wholesale Customers</div>
   <div class="ni" data-page="customers" onclick="nav('customers')"><span class="ic">👥</span> All Customers</div>
   <div class="sg admin-only">Suppliers</div>
   <div class="ni admin-only" data-page="suppliers" onclick="nav('suppliers')"><span class="ic">🏢</span> Suppliers</div>
@@ -219,7 +219,7 @@ tr:hover td{background:rgba(245,246,250,.7)}
 <div id="pg-dashboard" class="pg active">
   <div class="ph"><div><div class="pt">Dashboard</div><div class="ps" id="dash-date"></div></div></div>
   <div class="kg" id="kpi-grid"></div>
-  <div id="dash-reservations-panel" style="display:none;background:#fff;border-radius:10px;padding:16px 20px;margin-bottom:16px;border-left:4px solid var(--or);box-shadow:0 1px 3px rgba(0,0,0,.08)"><div style="display:flex;justify-content:space-between;align-items:center"><div style="font-weight:700;color:var(--nv)">📋 Pending Wholesale Orders</div><button class="btn btn-p btn-sm" onclick="nav('wholesale')" style="font-size:12px">View & Approve →</button></div><div id="dash-res-list" style="margin-top:10px;font-size:13px"></div></div>
+  <div id="dash-reservations-panel" style="display:none;background:#fff;border-radius:10px;padding:16px 20px;margin-bottom:16px;border-left:4px solid var(--or);box-shadow:0 1px 3px rgba(0,0,0,.08)"><div style="display:flex;justify-content:space-between;align-items:center"><div style="font-weight:700;color:var(--nv)">&#x1F4CB; Pending Wholesale Orders</div><button class="btn btn-p btn-sm" onclick="nav('wholesale')" style="font-size:12px">View &amp; Approve &#x2192;</button></div><div id="dash-res-list" style="margin-top:10px;font-size:13px"></div></div>
   <div class="crow">
     <div class="cc"><div class="cct">Revenue by Product</div><div id="chart-prod"></div></div>
     <div class="cc"><div class="cct">Sales Mix</div><div id="chart-mix" style="display:flex;flex-direction:column;gap:10px"></div></div>
@@ -335,7 +335,7 @@ tr:hover td{background:rgba(245,246,250,.7)}
     </div>
   </div>
   <div id="wc-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(285px,1fr));gap:12px;margin-bottom:18px"></div>
-  <div id="whl-res-section" style="display:none;margin-bottom:16px">
+  <div id="whl-res-section" style="margin-bottom:16px">
     <div class="tct" style="font-size:13px;font-weight:600;margin-bottom:8px;color:var(--nv)">📋 Pending Reservations</div>
     <div id="whl-res-tbl"></div>
   </div>
@@ -892,18 +892,7 @@ tr:hover td{background:rgba(245,246,250,.7)}
 <div class="mo" id="m-pay"><div class="md">
   <div class="mt">Record Partner Payment</div>
   <div class="fg fg2">
-    <div class="fgp"><label>Date</label><input type="date" id="pay-date"></div>
-    <div class="fgp"><label>Partner</label><select id="pay-par"><option>Saleem</option><option>Saed</option></select></div>
-    <div class="fgp"><label>Amount (NIS)</label><input type="number" id="pay-amt" placeholder="0.00"></div>
-    <div class="fgp"><label>Remark</label><input type="text" id="pay-rmk"></div>
-  </div>
-  <div class="fa">
-    <button class="btn btn-s" onclick="closeM('m-pay')">Cancel</button>
-    <button class="btn btn-p" onclick="addPayment()">Record</button>
-  </div>
-</div></div>
-
-<script>
+    <div class="fgp"><label>Date</label><input type="date"
 const SK = "copra_session_v1";
 let CURRENT_ROLE = "";
 let CURRENT_USER = null;
@@ -1074,13 +1063,12 @@ async function dbInsert(table, row) {
     }
   }
   const _df=['date','collection_date','payment_date','shipment_date','confirmed_at','datetime'];
-  for(const k of Object.keys(sbRow)){if((sbRow[k]===''||sbRow[k]===undefined)&&_df.includes(k))sbRow[k]=null;}
+  for(const _k of Object.keys(sbRow)){if((sbRow[_k]===''||sbRow[_k]===undefined)&&_df.includes(_k))sbRow[_k]=null;}
   try {
     await sbInsert(sbTable, sbRow);
   } catch(e) {
     console.warn('Supabase insert failed for', table, ':', e.message);
-    // Show visible error so we know what's wrong
-    console.error('Row that failed:', JSON.stringify(sbRow).substring(0,300));
+    console.error('Row:', JSON.stringify(sbRow).substring(0,300));
   }
 }
 
@@ -1328,8 +1316,13 @@ function applyRoleRestrictions(){
   }
   // Hide admin-only sidebar items
   document.querySelectorAll('.admin-only').forEach(el=>el.style.display=admin?'flex':'none');
-  // Hide cost columns from sales role (done via CSS class)
+  // Wholesale always visible to all roles
+  var _wn=document.querySelector('.ni[data-page="wholesale"]');
+  if(_wn)_wn.style.display='flex';
+  // Hide cost columns from sales
   document.querySelectorAll('.cost-col').forEach(el=>el.style.display=admin?'':'none');
+  // Hide wholesale admin-only actions
+  document.querySelectorAll('.wc-admin-only').forEach(el=>el.style.display=admin?'':'none');
 }
 
 function logout(){sessionStorage.removeItem(SK);location.reload();}
@@ -1502,19 +1495,10 @@ function populateSels(){
 function renderDash(){
   if(isAdmin()){
     renderReservations();
-    const pending=(DB.reservations||[]).filter(r=>r.status==='Pending');
-    const panel=document.getElementById('dash-reservations-panel');
-    const listEl=document.getElementById('dash-res-list');
-    if(panel){
-      panel.style.display=pending.length?'block':'none';
-      if(listEl&&pending.length){
-        listEl.innerHTML=pending.slice(0,5).map(r=>{
-          const wc=(DB.wholesale_customers||[]).find(c=>c.id===r.customer_id);
-          const p=gP(r.product_id);const v=gV(r.variant_id);
-          return'<div style="padding:6px 0;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between"><span><strong>'+(wc?.name||r.customer_name||'?')+'</strong> — '+(p?.name||'?')+' '+(v?vLabel(v):'')+' × '+r.qty+'</span><span style="font-size:11px;color:var(--mu)">'+dF(r.date)+'</span></div>';
-        }).join('')+(pending.length>5?'<div style="font-size:11px;color:var(--mu);padding-top:6px">+'+(pending.length-5)+' more</div>':'');
-      }
-    }
+    var _pr=(DB.reservations||[]).filter(function(r){return r.status==='Pending';});
+    var _pp=document.getElementById('dash-reservations-panel');
+    var _pl=document.getElementById('dash-res-list');
+    if(_pp){_pp.style.display=_pr.length?'block':'none';if(_pl&&_pr.length){_pl.innerHTML=_pr.slice(0,5).map(function(r){var wc=(DB.wholesale_customers||[]).find(function(c){return c.id===r.customer_id;});var p=gP(r.product_id);var v=gV(r.variant_id);return '<div style="padding:6px 0;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between"><span><strong>'+(wc&&wc.name||r.customer_name||'?')+'</strong> \u2014 '+(p&&p.name||'?')+' '+(v?vLabel(v):'')+' \xd7 '+r.qty+'</span><span style="font-size:11px;color:var(--mu)">'+dF(r.date)+'</span></div>';}).join('')+(_pr.length>5?'<div style="font-size:11px;color:var(--mu);padding-top:6px">+'+(_pr.length-5)+' more</div>':'');}}
   }
 
   document.getElementById('dash-date').textContent=new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
@@ -2479,7 +2463,7 @@ function renderWholesale(){
         <div style="font-size:11px;color:var(--mu)">${c.phone||'—'} · ${c.credit_days||30} day terms</div></div>
         <div style="display:flex;gap:6px">
           <button class="btn btn-s btn-sm" onclick="document.getElementById('wc-stmt-sel').value='${c.id}';renderWCStmt()">Statement</button>
-          <button class="btn btn-s btn-sm" onclick="openEditWC('${c.id}')">✏️ Edit</button>
+          ${isAdmin()?`<button class="btn btn-s btn-sm" onclick="openEditWC('${c.id}')">✏️ Edit</button>`:''}
         </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:9px;font-size:12px">
@@ -4046,7 +4030,7 @@ function renderReservations(){
         <td>${nisF(price*(+r.qty||1))}</td>
         <td><span class="b ${r.status==='Pending'?'bo':r.status==='Approved'?'bg':'br'}">${r.status}</span></td>
         <td style="white-space:nowrap">
-          ${r.status==='Pending'?`<button class="btn btn-p btn-sm" onclick="approveReservation('${r.id}')">✅ Approve</button>
+          ${r.status==='Pending'&&isAdmin()?`<button class="btn btn-p btn-sm" onclick="approveReservation('${r.id}')">✅ Approve</button>
           <button class="btn btn-d btn-sm" onclick="rejectReservation('${r.id}')">✕ Reject</button>`:''}
         </td>
       </tr>`;
@@ -4070,6 +4054,21 @@ function approveReservation(id){
     car_make:v.car_make||'',car_model:v.car_model||'',year_from:v.year_from||'',year_to:v.year_to||'',
     set_type:v.set_type||'',remark:'From reservation '+id,gp_nis:+((price-fifoUnit)*(+r.qty||1)).toFixed(2),is_return:false};
   DB.sales.push(sale);pushRow('sales',sale);
+  r.status='Approved';r.sale_id=sale.id;
+  dbUpdate('reservations', r.id, r);
+  renderReservations();renderSales();renderDash();
+  alert('✅ Reservation approved and sale created.');
+}
+function rejectReservation(id){
+  const r=(DB.reservations||[]).find(x=>x.id===id);if(!r)return;
+  if(!confirm('Reject this reservation?'))return;
+  r.status='Rejected';
+  dbUpdate('reservations', r.id, r);
+  renderReservations();
+}
+
+// nav and openM patches have been merged into the original functions above
+.sales.push(sale);pushRow('sales',sale);
   r.status='Approved';r.sale_id=sale.id;
   dbUpdate('reservations', r.id, r);
   renderReservations();renderSales();renderDash();
