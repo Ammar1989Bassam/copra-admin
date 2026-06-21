@@ -1116,6 +1116,75 @@ function uid(){return 'r'+Date.now().toString(36)+Math.random().toString(36).sli
 
 document.addEventListener('DOMContentLoaded',()=>{checkSession();});
 
+
+// ── Compatibility: sbFetch routes through Edge Functions ─────────
+// All write operations go through data-write Edge Function
+// Read operations use anon key directly (RLS protects them)
+async function sbFetch(path, options={}, useService=false) {
+  // For RPC calls (login, password updates) - use anon key directly
+  if (path.includes('/rpc/')) {
+    const res = await fetch(SB_URL + path, {
+      method: options.method || 'GET',
+      headers: {
+        'apikey': SB_ANON,
+        'Authorization': 'Bearer ' + (SESSION_TOKEN || SB_ANON),
+        'Content-Type': 'application/json',
+        'Prefer': options.prefer || 'return=minimal'
+      },
+      body: options.body
+    });
+    if(!res.ok){const e=await res.text();throw new Error(e);}
+    const ct=res.headers.get('content-type')||'';
+    if(ct.includes('json')&&res.status!==204)return res.json();
+    return null;
+  }
+  // For REST table operations - route through Edge Function
+  const method = options.method || 'GET';
+  if (method === 'GET' || method === undefined) {
+    // Read: use anon key (RLS allows products/variants for anon, rest requires session)
+    const res = await fetch(SB_URL + path, {
+      method: 'GET',
+      headers: {
+        'apikey': SB_ANON,
+        'Authorization': 'Bearer ' + (SESSION_TOKEN || SB_ANON),
+        'Content-Type': 'application/json'
+      }
+    });
+    if(!res.ok){const e=await res.text();throw new Error(e);}
+    const ct=res.headers.get('content-type')||'';
+    if(ct.includes('json')&&res.status!==204)return res.json();
+    return null;
+  }
+  // Write: extract table and id from path and route to Edge Function
+  const tableMatch = path.match(/\/rest\/v1\/(\w+)/);
+  const idMatch = path.match(/id=eq\.([^&]+)/);
+  if (tableMatch) {
+    const table = tableMatch[1];
+    const id = idMatch ? idMatch[1] : null;
+    const body = options.body ? JSON.parse(options.body) : {};
+    if (method === 'POST') {
+      return await callFn('data-write', {action:'insert', table, row:body});
+    } else if (method === 'PATCH') {
+      return await callFn('data-write', {action:'update', table, id, updates:body});
+    } else if (method === 'DELETE') {
+      return await callFn('data-write', {action:'delete', table, id});
+    }
+  }
+  return null;
+}
+async function sbInsert(table, row) {
+  return callFn('data-write', {action:'insert', table, row});
+}
+async function sbUpdate(table, id, updates) {
+  return callFn('data-write', {action:'update', table, id, updates});
+}
+async function sbDelete(table, id) {
+  return callFn('data-write', {action:'delete', table, id});
+}
+async function sbSelect(table, query, svc) {
+  return sbFetch('/rest/v1/'+table+'?'+(query||'')+'&limit=10000', {}, svc);
+}
+
 function nav(page){
   document.querySelectorAll('.pg').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.ni').forEach(n=>n.classList.remove('active'));
