@@ -2379,12 +2379,13 @@ function openEditWC(id){
   const pa=document.getElementById('wc-portal-active');if(pa)pa.value=c.portal_active===false?'false':'true';
   openM('m-wc');
 }
-function saveWC(){
+async function saveWC(){
   const name=document.getElementById('wc-nm').value.trim();if(!name){alert('Enter name.');return;}
   const editId=document.getElementById('wc-edit-id').value;
   const portalUser=(document.getElementById('wc-portal-user')?.value||'').trim().toLowerCase();
   const portalPin=document.getElementById('wc-portal-pin')?.value||'';
   const portalActive=document.getElementById('wc-portal-active')?.value!=='false';
+  if(portalPin&&portalPin.length<4){alert('Portal password must be at least 4 characters.');return;}
   const row={id:editId||uid(),name,
     phone:document.getElementById('wc-ph').value,
     credit_limit_nis:parseFloat(document.getElementById('wc-limit').value)||0,
@@ -2393,16 +2394,25 @@ function saveWC(){
     notes:document.getElementById('wc-notes').value,
     portal_username:portalUser||name.toLowerCase().replace(/\s+/g,''),
     portal_active:portalActive};
-  if(portalPin){if(portalPin.length<4){alert('Portal PIN must be at least 4 digits.');return;}row.portal_pin=portalPin;}
-  if(editId){
-    const idx=DB.wholesale_customers.findIndex(x=>x.id===editId);
-    if(idx>=0)DB.wholesale_customers[idx]={...DB.wholesale_customers[idx],...row};
-    dbUpdate('wholesale_customers', row.id, row);
-  }else{
-    DB.wholesale_customers.push(row);
-    dbInsert('wholesale_customers', row);
-  }
-  closeM('m-wc');populateSels();renderWholesale();
+  showLoader('Saving…');
+  try{
+    if(editId){
+      const idx=DB.wholesale_customers.findIndex(x=>x.id===editId);
+      if(idx>=0)DB.wholesale_customers[idx]={...DB.wholesale_customers[idx],...row};
+      await sbFetch('/rest/v1/wholesale_customers?id=eq.'+editId,{method:'PATCH',body:JSON.stringify(row)},true);
+    }else{
+      DB.wholesale_customers.push(row);
+      await sbInsert('wholesale_customers',row);
+    }
+    // Hash and save password via RPC if provided
+    if(portalPin){
+      await sbFetch('/rest/v1/rpc/update_portal_password',{
+        method:'POST',body:JSON.stringify({p_customer_id:row.id,p_password:portalPin})
+      },true);
+    }
+    hideLoader();
+    closeM('m-wc');populateSels();renderWholesale();
+  }catch(e){hideLoader();alert('❌ Error: '+e.message);}
 }
 function renderWholesale(){
   const cards=document.getElementById('wc-cards');
@@ -3862,7 +3872,7 @@ function editWCUser(id){
   document.getElementById('wcuser-password').value='';
   openM('m-wcuser');
 }
-function saveWCUser(){
+async function saveWCUser(){
   const custId=document.getElementById('wcuser-cust-sel').value;
   const uname=(document.getElementById('wcuser-username').value||'').trim().toLowerCase();
   const pwd=document.getElementById('wcuser-password').value;
@@ -3870,11 +3880,31 @@ function saveWCUser(){
   if(!custId){alert('Select a customer.');return;}
   if(!uname){alert('Enter a username.');return;}
   if(!editId&&!pwd){alert('Enter a password for new portal user.');return;}
+  if(pwd&&pwd.length<4){alert('Password must be at least 4 characters.');return;}
   const c=(DB.wholesale_customers||[]).find(x=>x.id===custId);if(!c)return;
-  c.portal_username=uname;
-  if(pwd)c.portal_password=pwd;
-  dbUpdate('wholesale_customers', c.id, c);
-  closeM('m-wcuser');renderSetupWCUsers();
+  showLoader('Saving portal credentials…');
+  try {
+    // 1. Update username on the customer record
+    c.portal_username=uname;
+    c.portal_active=true;
+    await sbFetch('/rest/v1/wholesale_customers?id=eq.'+custId, {
+      method:'PATCH',
+      body:JSON.stringify({portal_username:uname, portal_active:true})
+    }, true);
+    // 2. Hash and save password via RPC (bcrypt)
+    if(pwd){
+      await sbFetch('/rest/v1/rpc/update_portal_password', {
+        method:'POST',
+        body:JSON.stringify({p_customer_id:custId, p_password:pwd})
+      }, true);
+    }
+    hideLoader();
+    closeM('m-wcuser');renderSetupWCUsers();
+    alert('✅ Portal credentials saved. Customer can now log in at the portal.');
+  } catch(e) {
+    hideLoader();
+    alert('❌ Error saving credentials: '+e.message);
+  }
 }
 function removeWCPortal(id){
   if(!confirm('Remove portal access for this customer?'))return;
