@@ -952,17 +952,18 @@ tr:hover td{background:rgba(245,246,250,.7)}
 </div></div>
 
 <script>
+const SK = "copra_session_v1";
+let CURRENT_ROLE = "";
+let CURRENT_USER = null;
+function isAdmin(){return CURRENT_ROLE==="admin";}
+function isSales(){return CURRENT_ROLE==="sales";}
+
 
 // ═══ SECURE CONFIG ══════════════════════════════════════════════
 const SB_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVkb3B4Zmp6d3h5Y3RxZGJ6YWdyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE5NTMyMTQsImV4cCI6MjA5NzUyOTIxNH0.55wDddJZ6g5_jM-o8UhYb0yvJ2xMKKyZ-FzFFC7F0qI';
 const FN_BASE = 'https://edopxfjzwxyctqdbzagr.supabase.co/functions/v1';
 const SB_URL  = 'https://edopxfjzwxyctqdbzagr.supabase.co';
-const SK = 'copra_session_v1';
-let CURRENT_ROLE = '';
-let CURRENT_USER = null;
 let SESSION_TOKEN = null;
-function isAdmin(){return CURRENT_ROLE==='admin';}
-function isSales(){return CURRENT_ROLE==='sales';}
 
 // ── Edge Function caller ─────────────────────────────────────────
 async function callFn(fnName, body, requireAuth) {
@@ -1115,7 +1116,1237 @@ function uid(){return 'r'+Date.now().toString(36)+Math.random().toString(36).sli
 
 document.addEventListener('DOMContentLoaded',()=>{checkSession();});
 
+function nav(page){
+  document.querySelectorAll('.pg').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.ni').forEach(n=>n.classList.remove('active'));
+  document.getElementById('pg-'+page)?.classList.add('active');
+  document.querySelector(`.ni[data-page="${page}"]`)?.classList.add('active');
+  if(page==='setup'){setTimeout(()=>{renderSetupUsers&&renderSetupUsers();renderSetupWCUsers&&renderSetupWCUsers();},50);}
+  if(page==='handover'){populateSels();renderHandover&&renderHandover();return;}
+  populateSels();
+  ({dashboard:renderDash,sales:renderSales,colbatches:renderColBatches,inventory:renderInv,
+    purchases:renderPur,wholesale:renderWholesale,customers:renderCusts,expenses:renderExp,
+    payments:renderPay,products:renderProds,suppliers:renderSuppliers,vehicles:renderVehicles,financials:renderFinancials,assets:renderAssets}[page]||function(){})();
+}
 
+// ═══ POPULATE SELECTS ════════════════════════════════════════
+function populateSels(){
+  const pOpts='<option value="">— select —</option>'+DB.products.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+  ['s-prod','r-prod','nb-prod','ac-prod','pu-prod'].forEach(id=>{const e=document.getElementById(id);if(e){const v=e.value;e.innerHTML=pOpts;e.value=v;}});
+  // Customer datalist
+  const dl=document.getElementById('dl-cust');
+  if(dl){const ns=[...new Set(DB.sales.map(s=>s.customer_name||s.customer).filter(Boolean))];dl.innerHTML=ns.map(n=>`<option value="${n}">`).join('');}
+  // WC select
+  const wcSel=document.getElementById('s-wc-id');
+  if(wcSel)wcSel.innerHTML='<option value="">— select —</option>'+DB.wholesale_customers.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+  // WC stmt filter
+  const stmtSel=document.getElementById('wc-stmt-sel');
+  if(stmtSel){const cur=stmtSel.value;stmtSel.innerHTML='<option value="">Select customer…</option>'+DB.wholesale_customers.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');stmtSel.value=cur;}
+  // Car makes (only from variants)
+  const carMake=document.getElementById('s-car-make');
+  if(carMake&&carMake.options.length<=1){carMake.innerHTML='<option value="">— any make —</option>'+getAllMakes().map(m=>`<option value="${m}">${m}</option>`).join('');}
+  // Inv filters
+  const ipf=document.getElementById('inv-prod-filter');
+  if(ipf){const cur=ipf.value;ipf.innerHTML='<option value="">All Products</option>'+DB.products.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');ipf.value=cur;}
+  // Collection batch selects
+  const cbSel=document.getElementById('cb-assign-sel');
+  if(cbSel){cbSel.innerHTML='<option value="">Select open batch…</option>'+DB.collection_batches.filter(b=>b.status==='Open').map(b=>`<option value="${b.id}">${b.batch_name}</option>`).join('');}
+  // Add variant make (only known makes)
+  const avMake=document.getElementById('av-make');
+  if(avMake&&avMake.options.length<=1){avMake.innerHTML='<option value="">— none (accessory) —</option>'+getAllMakes().map(m=>`<option value="${m}">${m}</option>`).join('');}
+
+  const _supOpts2='<option value="">— select —</option>'+(DB.suppliers||[]).map(s=>`<option value="${s.id}">${s.name} (${s.type})</option>`).join('');
+  ['pu-supplier-id','sup-batch-sup-id'].forEach(id=>{const e=document.getElementById(id);if(e){const v=e.value;e.innerHTML=_supOpts2;e.value=v;}});
+}
+
+// ═══ DASHBOARD ═══════════════════════════════════════════════
+function renderDash(){
+  if(isAdmin()){renderReservations();var _pr=(DB.reservations||[]).filter(function(r){return r.status==='Pending';});var _pp=document.getElementById('dash-reservations-panel');var _pl=document.getElementById('dash-res-list');if(_pp){_pp.style.display=_pr.length?'block':'none';if(_pl&&_pr.length){_pl.innerHTML=_pr.slice(0,5).map(function(r){var wc=(DB.wholesale_customers||[]).find(function(c){return c.id===r.customer_id;});var p=gP(r.product_id);var v=gV(r.variant_id);return'<div style="padding:6px 0;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between"><span><strong>'+(wc&&wc.name||r.customer_name||'?')+'</strong> - '+(p&&p.name||'?')+' '+(v?vLabel(v):'')+' x '+r.qty+'</span><span style="font-size:11px;color:var(--mu)">'+dF(r.date)+'</span></div>';}).join('')+(_pr.length>5?'<div style="font-size:11px;color:var(--mu);padding-top:6px">+'+(_pr.length-5)+' more</div>':'');}}}
+
+  document.getElementById('dash-date').textContent=new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  const sales=DB.sales.filter(s=>!isRet(s));
+  const rev=sales.reduce((a,s)=>a+(+s.unit_price||0)*(+s.qty||1),0);
+  const cSales=sales.filter(s=>isColl(s.payment_status));
+  const coll=cSales.reduce((a,s)=>a+(+s.unit_price||0)*(+s.qty||1),0);
+  const cos=cSales.reduce((a,s)=>a+(+s.unit_cost_nis||0)*(+s.qty||1),0);
+  const gp=coll-cos;
+  const pnd=sales.filter(s=>!isColl(s.payment_status)).reduce((a,s)=>a+(+s.unit_price||0)*(+s.qty||1),0);
+  const overdue=DB.wholesale_customers.reduce((a,c)=>a+getWCOverdue(c.id),0);
+  // Stock values
+  const stkCost=DB.variants.reduce((a,v)=>a+getStock(v.id)*getFifoCost(v.id),0);
+  const stkRetail=DB.variants.reduce((a,v)=>a+getStock(v.id)*(+v.retail||0),0);
+  const rets=DB.sales.filter(isRet).length;
+  document.getElementById('kpi-grid').innerHTML=[
+    {l:'Cash Collected',v:nisF(coll),s:pctF(coll/(rev||1))+' of invoiced',c:'gold'},
+    {l:'Gross Profit',v:nisF(gp),s:pctF(gp/(coll||1))+' margin (FIFO)',c:'green'},
+    {l:'Pending Collection',v:nisF(pnd),s:sales.filter(s=>!isColl(s.payment_status)).length+' invoices',c:'red'},
+    {l:'Overdue (WC)',v:nisF(overdue),s:'Past credit terms',c:'purple'},
+    {l:'Stock Value (Cost)',v:nisF(stkCost),s:'FIFO cost',c:'blue'},
+    {l:'Stock Value (Retail)',v:nisF(stkRetail),s:'If sold at retail',c:'cyan'},
+    {l:'Total Invoiced',v:nisF(rev),s:sales.length+' transactions',c:''},
+    {l:'Returns',v:rets,s:'Units returned',c:''},
+  ].map(k=>`<div class="kc ${k.c}"><div class="kl">${k.l}</div><div class="kv">${k.v}</div><div class="ks">${k.s}</div></div>`).join('');
+  // Product revenue chart
+  const byP={};sales.forEach(s=>{const n=pN(s.product_id)||'Other';byP[n]=(byP[n]||0)+(+s.unit_price||0)*(+s.qty||1);});
+  const sp=Object.entries(byP).sort((a,b)=>b[1]-a[1]).slice(0,8);const mx=sp[0]?.[1]||1;
+  document.getElementById('chart-prod').innerHTML=sp.map(([n,v])=>`<div class="br-row"><div class="br-lbl" title="${n}">${n}</div><div class="br-trk"><div class="br-fil" style="width:${(v/mx*100).toFixed(1)}%"></div></div><div class="br-val">${nisF(v)}</div></div>`).join('');
+  // Mix
+  const rt=sales.filter(s=>s.sale_type==='Retail').reduce((a,s)=>a+(+s.unit_price||0)*(+s.qty||1),0);
+  const wh=sales.filter(s=>s.sale_type==='Wholesale').reduce((a,s)=>a+(+s.unit_price||0)*(+s.qty||1),0);
+  const tt=rt+wh||1;
+  document.getElementById('chart-mix').innerHTML=[
+    ['🏪 Retail',rt,tt,'var(--gd)'],['🏭 Wholesale',wh,tt,'var(--nv)']
+  ].map(([lbl,v,tot,col])=>`<div>
+    <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-weight:600;font-size:12px">${lbl}</span><span style="font-weight:700;font-size:12px">${nisF(v)} (${(v/tot*100).toFixed(0)}%)</span></div>
+    <div class="br-trk" style="height:11px;border-radius:6px"><div class="br-fil" style="width:${(v/tot*100).toFixed(1)}%;height:100%;background:${col};border-radius:6px"></div></div>
+    <div style="font-size:10px;color:var(--mu);margin-top:2px">${DB.sales.filter(s=>!isRet(s)&&s.sale_type===(lbl.includes('Retail')?'Retail':'Wholesale')).length} transactions</div>
+  </div>`).join('');
+  // Low stock
+  const low=DB.variants.map(v=>({...v,stk:getStock(v.id),prod:gP(v.product_id)})).filter(v=>v.stk<=(+(v.prod?.alert_qty||5))).sort((a,b)=>a.stk-b.stk).slice(0,10);
+  document.getElementById('low-tbl').innerHTML=low.length?tbl(low.map(v=>({'Product':v.prod?.name||'—','Variant':vLabel(v),'In Stock':`<span class="b ${v.stk===0?'br':'bo'}">${v.stk}</span>`,'FIFO Cost':nisF(getFifoCost(v.id))}))):
+    '<div style="padding:14px;text-align:center;color:var(--gn);font-size:12px">✅ All adequately stocked</div>';
+  // Overdue
+  const odR=DB.wholesale_customers.map(c=>({c,b:getWCBal(c.id),od:getWCOverdue(c.id)})).filter(x=>x.od>0);
+  document.getElementById('overdue-tbl').innerHTML=odR.length?tbl(odR.map(x=>({'Customer':x.c.name,'Balance':nisF(x.b),'Overdue':`<span class="aneg">${nisF(x.od)}</span>`,'Limit':nisF(+x.c.credit_limit_nis||0)}))):
+    '<div style="padding:14px;text-align:center;color:var(--gn);font-size:12px">✅ No overdue receivables</div>';
+  // Recent
+  const rec=[...DB.sales].sort((a,b)=>String(b.date).localeCompare(String(a.date))).slice(0,10);
+  document.getElementById('recent-tbl').innerHTML=tbl(rec.map(s=>{
+    const ret=isRet(s);const tot=(+s.unit_price||0)*(+s.qty||1);
+    return{_id:s.id,'Date':dF(s.date),'Product':ret?'<span class="b br">↩ Return</span>':(pN(s.product_id)||'—'),
+      'Variant':s.variant_label||'—','Customer':s.customer_name||s.customer||'—',
+      'Amount':ret?`<span class="aneg">${nisF(tot)}</span>`:nisF(tot),
+      'Type':ptBadge(s.payment_type),'Status':pBadge(s.payment_status),
+      '_actions':`<button class="btn btn-s btn-sm" onclick="openEditSale('${s.id}')">✏️</button>`};
+  }),true);
+}
+
+// ═══ SALES ═══════════════════════════════════════════════════
+function openSale(type){
+  // Set type
+  const typeEl=document.getElementById('s-type');
+  if(typeEl)typeEl.value=type;
+  // Badge
+  const badge=document.getElementById('s-type-badge');
+  if(badge){
+    badge.textContent=type==='Retail'?'🏪 Retail':'🏭 Wholesale';
+    badge.style.background=type==='Retail'?'#1A8C5B':'#1B2A4A';
+    badge.style.color='#fff';
+  }
+  // Customer fields
+  const wcWrap=document.getElementById('s-wc-wrap');
+  const custWrap=document.getElementById('s-cust-wrap');
+  if(wcWrap)wcWrap.style.display=type==='Wholesale'?'':'none';
+  if(custWrap)custWrap.style.display=type==='Retail'?'':'none';
+  // Payment type options
+  const pt=document.getElementById('s-paytype');
+  if(pt){
+    if(type==='Retail'){
+      pt.innerHTML='<option value="Cash">Cash — collected immediately ✅</option><option value="COD">Cash on Delivery (COD)</option>';
+      pt.value='Cash';
+    } else {
+      pt.innerHTML='<option value="Credit">Credit — collected via account</option>';
+      pt.value='Credit';
+    }
+  }
+  // Reset fields
+  const d=tod();
+  document.getElementById('s-date').value=d;
+  ['s-cust','s-stock-info','s-cost','s-rmk'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  document.getElementById('s-qty').value=1;
+  document.getElementById('s-disc').value=0;
+  document.getElementById('s-price').value='';
+  document.getElementById('s-floor-warn').style.display='none';
+  document.getElementById('s-gp-preview').style.display='none';
+  // Populate makes
+  const makes=[...new Set(DB.variants.filter(v=>v.car_make).map(v=>v.car_make))].sort();
+  const makeEl=document.getElementById('s-car-make');
+  if(makeEl)makeEl.innerHTML='<option value="">— any make —</option>'+makes.map(m=>`<option value="${m}">${m}</option>`).join('');
+  document.getElementById('s-car-model').innerHTML='<option value="">— any model —</option>';
+  document.getElementById('s-car-year').value='';
+  document.getElementById('s-compat-prods').innerHTML='<option value="">— select —</option>';
+  // Populate products
+  const pSel=document.getElementById('s-prod');
+  if(pSel)pSel.innerHTML='<option value="">— select —</option>'+DB.products.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+  document.getElementById('s-variant').innerHTML='<option value="">— select product first —</option>';
+  // Populate WC customers
+  const wcSel=document.getElementById('s-wc-id');
+  if(wcSel)wcSel.innerHTML='<option value="">— select —</option>'+DB.wholesale_customers.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+  document.getElementById('s-wc-info').textContent='';
+  // Show paytype buttons for retail, hide for wholesale
+  const ptWrap=document.getElementById('s-paytype-wrap');
+  if(ptWrap)ptWrap.style.display=type==='Retail'?'':'none';
+  if(type==='Retail')setSalePayType('Cash');
+  onPayTypeChange();
+  openM('m-sale');
+}
+function onSaleTypeChange(){
+  const isWS=document.getElementById('s-type').value==='Wholesale';
+  document.getElementById('s-wc-wrap').style.display=isWS?'grid':'none';
+  document.getElementById('s-cust-wrap').style.display=isWS?'none':'grid';
+  const cOpt=document.querySelector('#s-paytype option[value="Credit"]');
+  if(cOpt)cOpt.disabled=!isWS;
+  if(!isWS&&document.getElementById('s-paytype').value==='Credit')document.getElementById('s-paytype').value='Cash';
+  onPayTypeChange();
+}
+function onWCSelect(){
+  const id=document.getElementById('s-wc-id').value;
+  const el=document.getElementById('s-wc-info');if(!el)return;
+  if(!id){el.textContent='';return;}
+  const wc=gWC(id);if(!wc)return;
+  const bal=getWCBal(id),lim=+wc.credit_limit_nis||0,avail=lim-bal;
+  el.innerHTML=`Balance: <strong>${nisF(bal)}</strong> / Limit: <strong>${nisF(lim)}</strong> / Available: <strong class="${avail>0?'apos':'aneg'}">${nisF(avail)}</strong> · Disc: ${+wc.discount_pct||0}%`;
+  // Refresh price with customer discount
+  const vid=document.getElementById('s-variant').value;
+  if(vid)onVariantSelect();
+}
+function onSaleProdChange(){
+  const pid=document.getElementById('s-prod').value;
+  const vSel=document.getElementById('s-variant');
+  vSel.innerHTML='<option value="">— select variant —</option>';
+  if(!pid){document.getElementById('s-stock-info').value='';return;}
+  DB.variants.filter(v=>v.product_id===pid).forEach(v=>{
+    const stk=getStock(v.id);
+    const o=document.createElement('option');o.value=v.id;
+    o.textContent=vLabel(v)+' | Stock: '+stk+' | ₪'+v.retail;
+    vSel.appendChild(o);
+  });
+  // Sync car make dropdown to only show makes for this product
+  const carMake=document.getElementById('s-car-make');
+  if(carMake){
+    const makes=getMakesForProduct(pid);
+    carMake.innerHTML='<option value="">— any make —</option>'+makes.map(m=>`<option value="${m}">${m}</option>`).join('');
+  }
+  onVariantSelect();
+}
+function onVariantSelect(){
+  const vid=document.getElementById('s-variant').value;
+  if(!vid){document.getElementById('s-stock-info').value='';document.getElementById('s-cost').value='';updateSalePreview();return;}
+  const v=gV(vid);if(!v)return;
+  const stk=getStock(vid);const cost=getFifoCost(vid);
+  document.getElementById('s-stock-info').value=`${stk} units · FIFO cost: ${nisF(cost)}`;
+  document.getElementById('s-cost').value=cost.toFixed(2);
+  const type=(document.getElementById('s-type')?.value)||'Retail';
+  const isWS=type==='Wholesale';
+  const pe=document.getElementById('s-price');
+  if(isWS){
+    // Apply customer discount if any
+    const wcId=document.getElementById('s-wc-id')?.value;
+    const wc=wcId?gWC(wcId):null;
+    const disc=wc?(+wc.discount_pct||0):0;
+    pe.value=((+v.wholesale||0)*(1-disc/100)).toFixed(2);
+    pe.readOnly=true;
+    pe.style.background='var(--bg)';
+    pe.style.color='var(--mu)';
+    document.getElementById('s-disc').value=disc;
+    document.getElementById('s-disc').disabled=true;
+  } else {
+    pe.value=(+v.retail||0).toFixed(2);
+    pe.readOnly=false;
+    pe.style.background='';
+    pe.style.color='';
+    document.getElementById('s-disc').disabled=false;
+  }
+  checkFloor();updateSalePreview();
+}
+function onCarMakeChange(){
+  const make=document.getElementById('s-car-make').value;
+  const mSel=document.getElementById('s-car-model');
+  mSel.innerHTML='<option value="">— any model —</option>';
+  if(make)getModelsForMake(make).forEach(m=>{const o=document.createElement('option');o.value=m;o.textContent=m;mSel.appendChild(o);});
+  document.getElementById('s-car-year').value='';
+  document.getElementById('s-compat-prods').innerHTML='<option value="">— select —</option>';
+}
+function onCarModelChange(){updateCompatProducts();}
+function onCarYearChange(){updateCompatProducts();}
+function updateCompatProducts(){
+  const make=document.getElementById('s-car-make').value;
+  const model=document.getElementById('s-car-model').value;
+  const year=document.getElementById('s-car-year').value;
+  const cpSel=document.getElementById('s-compat-prods');
+  cpSel.innerHTML='<option value="">— select —</option>';
+  if(!make||!model)return;
+  const variants=getCompatibleVariants(make,model,year);
+  if(!variants.length){cpSel.innerHTML='<option value="">No compatible products found</option>';return;}
+  variants.forEach(v=>{
+    const p=gP(v.product_id);const stk=getStock(v.id);
+    const o=document.createElement('option');o.value=v.id;
+    o.textContent=`${p?p.name:'?'} · ${v.set_type||'—'} · ₪${v.retail} · Stock: ${stk}`;
+    cpSel.appendChild(o);
+  });
+}
+function onCompatProdSelect(){
+  const vid=document.getElementById('s-compat-prods').value;if(!vid)return;
+  const v=gV(vid);if(!v)return;
+  // Auto-fill product and variant
+  const pSel=document.getElementById('s-prod');pSel.value=v.product_id;onSaleProdChange();
+  setTimeout(()=>{document.getElementById('s-variant').value=vid;onVariantSelect();},50);
+}
+function applyDiscount(){
+  const vid=document.getElementById('s-variant').value;if(!vid)return;
+  const v=gV(vid);if(!v)return;
+  const d=+(document.getElementById('s-disc').value||0);
+  const isWS=document.getElementById('s-type').value==='Wholesale';
+  document.getElementById('s-price').value=((isWS?(+v.wholesale||0):(+v.retail||0))*(1-d/100)).toFixed(2);
+  checkFloor();updateSalePreview();
+}
+function checkFloor(){
+  const vid=document.getElementById('s-variant').value;
+  const warn=document.getElementById('s-floor-warn');
+  if(!vid||!warn){if(warn)warn.style.display='none';return;}
+  const v=gV(vid);if(!v){warn.style.display='none';return;}
+  const price=+(document.getElementById('s-price').value||0);
+  const cost=getFifoCost(vid);
+  const floor=cost*(1+(+v.min_margin_pct||15)/100);
+  warn.style.display=(price>0&&price<floor)?'block':'none';
+  updateSalePreview();
+}
+function updateSalePreview(){
+  const vid=document.getElementById('s-variant').value;
+  const prev=document.getElementById('s-gp-preview');
+  if(!vid||!prev){if(prev)prev.style.display='none';return;}
+  const qty=+(document.getElementById('s-qty').value||1);
+  const price=+(document.getElementById('s-price').value||0);
+  const cost=getFifoCost(vid);
+  if(!price){prev.style.display='none';return;}
+  const total=price*qty,totalCost=cost*qty,gp=total-totalCost;
+  prev.style.display='block';
+  document.getElementById('s-prev-total').textContent=nisF(total);
+  document.getElementById('s-prev-cost').textContent=nisF(totalCost);
+  const gpEl=document.getElementById('s-prev-gp');gpEl.textContent=nisF(gp);gpEl.className=gp>=0?'apos':'aneg';
+  const mEl=document.getElementById('s-prev-margin');mEl.textContent=pctF(gp/(total||1));mEl.className=gp>=0?'apos':'aneg';
+}
+function onPayTypeChange(){
+  const type=(document.getElementById('s-type')?.value)||'Retail';
+  const pt=(document.getElementById('s-paytype')?.value)||'Cash';
+  const pstatWrap=document.getElementById('s-pstat-wrap');
+  const colWrap=document.getElementById('s-colldate-wrap');
+  const pstatHidden=document.getElementById('s-pstat');
+  const pstatDisplay=document.getElementById('s-pstat-display');
+
+  if(type==='Retail'){
+    if(pt==='Cash'){
+      // Cash: status = Collected, hide status + colldate
+      if(pstatHidden)pstatHidden.value='Collected';
+      if(pstatDisplay)pstatDisplay.value='Collected (auto)';
+      if(pstatWrap)pstatWrap.style.display='none';
+      if(colWrap)colWrap.style.display='none';
+    } else {
+      // COD: status = Pending (locked), colldate disabled
+      if(pstatHidden)pstatHidden.value='Pending';
+      if(pstatDisplay)pstatDisplay.value='Pending — collected via Collection Batches';
+      if(pstatWrap)pstatWrap.style.display='';
+      if(colWrap)colWrap.style.display='none';
+    }
+  } else {
+    // Wholesale: always Pending, always locked
+    if(pstatHidden)pstatHidden.value='Pending';
+    if(pstatDisplay)pstatDisplay.value='Pending — collected via customer account';
+    if(pstatWrap)pstatWrap.style.display='';
+    if(colWrap)colWrap.style.display='none';
+  }
+}
+async function addSale(){
+  const vid=document.getElementById('s-variant').value;
+  const qty=+(document.getElementById('s-qty').value||1);
+  const price=+(document.getElementById('s-price').value||0);
+  const saleType=document.getElementById('s-type').value;
+  const payType=document.getElementById('s-paytype').value;
+  const isWS=saleType==='Wholesale';
+  const v=gV(vid);if(!vid||!price||!v){alert('Select a variant and enter price.');return;}
+  if(getStock(vid)<qty){alert(`Only ${getStock(vid)} units in stock for this variant.`);return;}
+  let custId='',custName='';
+  if(isWS){
+    custId=document.getElementById('s-wc-id').value;
+    if(!custId){alert('Select a wholesale customer.');return;}
+    const wc=gWC(custId);custName=wc?wc.name:'';
+    if(payType==='Credit'){
+      const bal=getWCBal(custId),lim=+wc.credit_limit_nis||0,tot=price*qty;
+      if(bal+tot>lim){alert(`⛔ CREDIT LIMIT EXCEEDED\n\n${custName}\nBalance: ${nisF(bal)}\nThis sale: ${nisF(tot)}\nLimit: ${nisF(lim)}\nOver by: ${nisF(bal+tot-lim)}\n\nCustomer must settle balance first.`);return;}
+    }
+  } else {custName=document.getElementById('s-cust').value;}
+  const cost=getFifoCost(vid);
+  const floor=cost*(1+(+v.min_margin_pct||15)/100);
+  if(price>0&&price<floor&&!confirm(`⚠️ Price ${nisF(price)} below minimum floor ${nisF(floor)}. Proceed?`))return;
+  const fifoUnit=await fifoDeduct(vid,qty);
+  const payStatus=document.getElementById('s-pstat')?.value||'Pending';
+  const p=gP(v.product_id);
+  const row={id:uid(),date:document.getElementById('s-date').value||tod(),customer_id:custId,customer_name:custName,
+    product_id:v.product_id,product_name:p?p.name:'',variant_id:vid,variant_label:vLabel(v),
+    batch_id:getActiveBatches(vid)[0]?.id||'',qty,unit_price:price,unit_cost_nis:+fifoUnit.toFixed(4),
+    discount_pct:+(document.getElementById('s-disc').value||0),payment_type:payType,payment_status:payStatus,
+    collection_batch_id:'',collection_date:'',sale_type:saleType,
+    car_make:v.car_make||'',car_model:v.car_model||'',year_from:v.year_from||'',year_to:v.year_to||'',
+    set_type:v.set_type||'',remark:document.getElementById('s-rmk').value||'',
+    gp_nis:+((price-fifoUnit)*qty).toFixed(2),is_return:false};
+  DB.sales.push(row);pushRow('sales',row);
+  closeM('m-sale');
+  ['s-price','s-disc','s-rmk','s-cust','s-stock-info','s-cost'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  document.getElementById('s-qty').value=1;
+  document.getElementById('s-gp-preview').style.display='none';
+  renderSales();renderDash();
+}
+async function addReturn(){
+  const vid=document.getElementById('r-variant').value;
+  const qty=+(document.getElementById('r-qty').value||1);
+  const amt=+(document.getElementById('r-amt').value||0);
+  const cust=document.getElementById('r-cust').value;
+  if(!cust){alert('Enter customer name.');return;}
+  if(qty<1){alert('Enter a valid quantity.');return;}
+  if(vid)await fifoRestore(vid,qty);
+  const v=gV(vid);const p=v?gP(v.product_id):null;
+  const row={id:uid(),date:document.getElementById('r-date').value||tod(),customer_id:'',customer_name:cust,
+    product_id:v?.product_id||'',product_name:p?.name||'',variant_id:vid||'',variant_label:vLabel(v)||'',
+    batch_id:'',qty,unit_price:-amt,unit_cost_nis:0,discount_pct:0,payment_type:'Cash',payment_status:'Returned',
+    collection_batch_id:'',collection_date:null,sale_type:'Return',
+    car_make:v?.car_make||'',car_model:v?.car_model||'',year_from:null,year_to:null,set_type:v?.set_type||'',
+    remark:'Return: '+document.getElementById('r-reason').value,gp_nis:0,is_return:true};
+  DB.sales.push(row);
+  await dbInsert('sales',row);
+  closeM('m-return');renderSales();renderDash();
+}
+function onReturnProdChange(){
+  const pid=document.getElementById('r-prod').value;
+  const vSel=document.getElementById('r-variant');
+  vSel.innerHTML='<option value="">—</option>'+DB.variants.filter(v=>v.product_id===pid).map(v=>`<option value="${v.id}">${vLabel(v)}</option>`).join('');
+}
+function renderSales(){
+  const q=(document.getElementById('sf-q')?.value||'').toLowerCase();
+  const ft=document.getElementById('sf-type')?.value||'';
+  const fpt=document.getElementById('sf-ptype')?.value||'';
+  const fst=document.getElementById('sf-status')?.value||'';
+  const fr=document.getElementById('sf-from')?.value||'';
+  const to=document.getElementById('sf-to')?.value||'';
+  let list=[...DB.sales].sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+  if(q)list=list.filter(s=>(s.customer_name||s.customer||'').toLowerCase().includes(q)||(pN(s.product_id)||'').toLowerCase().includes(q)||(s.variant_label||'').toLowerCase().includes(q)||(s.car_model||'').toLowerCase().includes(q));
+  if(ft==='Return')list=list.filter(isRet);
+  else if(ft)list=list.filter(s=>s.sale_type===ft&&!isRet(s));
+  if(fpt)list=list.filter(s=>s.payment_type===fpt);
+  if(fst)list=list.filter(s=>(s.payment_status||'').toLowerCase().includes(fst.toLowerCase()));
+  if(fr)list=list.filter(s=>String(s.date)>=fr);
+  if(to)list=list.filter(s=>String(s.date)<=to);
+  const nr=list.filter(s=>!isRet(s));
+  const rev=nr.reduce((a,s)=>a+(+s.unit_price||0)*(+s.qty||1),0);
+  const col=nr.filter(s=>isColl(s.payment_status)).reduce((a,s)=>a+(+s.unit_price||0)*(+s.qty||1),0);
+  const gp=nr.filter(s=>isColl(s.payment_status)).reduce((a,s)=>a+((+s.unit_price||0)-(+s.unit_cost_nis||0))*(+s.qty||1),0);
+  document.getElementById('sc-lbl').textContent=list.length+' transactions';
+  document.getElementById('sr-lbl').textContent=nisF(rev);
+  document.getElementById('sc2-lbl').textContent=nisF(col);
+  document.getElementById('sg-lbl').textContent=nisF(gp)+' ('+pctF(gp/(col||1))+')';
+  document.getElementById('sales-tbl').innerHTML=tbl(list.map(s=>{
+    const ret=isRet(s);const tot=(+s.unit_price||0)*(+s.qty||1);
+    const gpR=((+s.unit_price||0)-(+s.unit_cost_nis||0))*(+s.qty||1);
+    return{_id:s.id,'Date':dF(s.date),'Product':ret?'<span class="b br">↩</span>':(pN(s.product_id)||'—'),
+      'Variant':s.variant_label||'—','Customer':s.customer_name||s.customer||'—','Qty':s.qty||1,
+      'Price':ret?`<span class="aneg">${nisF(tot)}</span>`:nisF(tot),
+      'GP':isAdmin()?(ret?'—':`<span class="${gpR>=0?'apos':'aneg'}">${nisF(gpR)}</span>`):'—',
+      'GP%':ret||!+s.unit_price?'—':pctF(((+s.unit_price||0)-(+s.unit_cost_nis||0))/(+s.unit_price||1)),
+      'Type':`<span class="b ${s.sale_type==='Wholesale'?'bb':ret?'br':'bg'}">${ret?'Return':s.sale_type||'Retail'}</span>`,
+      'Pay':ptBadge(s.payment_type),'Status':pBadge(s.payment_status),
+      'Coll.Date':s.collection_date?dF(s.collection_date):'—',
+      '_actions':`<button class="btn btn-s btn-sm" onclick="openEditSale('${s.id}')">✏️</button>`};
+  }),true);
+}
+function clearSF(){['sf-q','sf-from','sf-to'].forEach(id=>document.getElementById(id).value='');['sf-type','sf-ptype','sf-status'].forEach(id=>document.getElementById(id).value='');renderSales();}
+function openEditSale(id){
+  const s=DB.sales.find(x=>x.id===id);if(!s)return;
+  document.getElementById('es-id').value=s.id;
+  document.getElementById('es-date').value=s.date||'';
+  document.getElementById('es-cust').value=s.customer_name||s.customer||'';
+  document.getElementById('es-qty').value=s.qty||1;
+  document.getElementById('es-price').value=s.unit_price||0;
+  document.getElementById('es-paytype').value=s.payment_type||'Cash';
+  document.getElementById('es-pstat').value=isColl(s.payment_status)?'Collected':s.payment_status||'Pending';
+  document.getElementById('es-colldate').value=s.collection_date||'';
+  document.getElementById('es-type').value=s.sale_type||'Retail';
+  document.getElementById('es-rmk').value=s.remark||'';
+  openM('m-edit-sale');
+}
+function saveEditSale(){
+  const id=document.getElementById('es-id').value;
+  const idx=DB.sales.findIndex(x=>x.id===id);if(idx===-1)return;
+  const s=DB.sales[idx];
+  s.date=document.getElementById('es-date').value;
+  s.customer_name=document.getElementById('es-cust').value;
+  s.qty=+(document.getElementById('es-qty').value||1);
+  s.unit_price=+(document.getElementById('es-price').value||0);
+  s.payment_type=document.getElementById('es-paytype').value;
+  s.payment_status=document.getElementById('es-pstat').value;
+  s.collection_date=document.getElementById('es-colldate').value||'';
+  s.sale_type=document.getElementById('es-type').value;
+  s.remark=document.getElementById('es-rmk').value;
+  DB.sales[idx]=s;
+  dbUpdate('sales', s.id, s);
+  closeM('m-edit-sale');renderSales();renderDash();
+}
+function deleteSale(){
+  const id=document.getElementById('es-id').value;
+  const s=DB.sales.find(x=>x.id===id);
+  if(!s||!confirm('Delete this sale? Stock will be restored.'))return;
+  if(!isRet(s)&&s.variant_id)fifoRestore(s.variant_id,+s.qty||1);
+  DB.sales=DB.sales.filter(x=>x.id!==id);
+  dbDelete('sales', id);
+  closeM('m-edit-sale');renderSales();renderDash();
+}
+
+// ═══ COLLECTION BATCHES ══════════════════════════════════════
+function updateCBSum(){
+  const checks=[...document.querySelectorAll('.cb-check:checked')];
+  const total=checks.reduce((a,c)=>a+parseFloat(c.dataset.amt||0),0);
+  const cnt=document.getElementById('cb-sum-count');
+  const tot=document.getElementById('cb-sum-total');
+  if(cnt)cnt.textContent=checks.length;
+  if(tot)tot.textContent=nisF(total);
+}
+function viewBatchInvoices(batchId){
+  const b=DB.collection_batches.find(x=>x.id===batchId);if(!b)return;
+  const sales=DB.sales.filter(s=>s.collection_batch_id===batchId&&!isRet(s));
+  const total=sales.reduce((a,s)=>a+(+s.unit_price||0)*(+s.qty||1),0);
+  document.getElementById('cb-inv-title').textContent=`Invoices in: ${b.batch_name}`;
+  document.getElementById('cb-inv-summary').innerHTML=
+    `<span>Status: <strong class="b ${b.status==='Open'?'bo':'bg'}">${b.status}</strong></span>
+     <span>Date: <strong>${b.collection_date?dF(b.collection_date):'—'}</strong></span>
+     ${b.barcode?`<span>Barcode: <strong>${b.barcode}</strong></span>`:''}
+     <span>Invoices: <strong>${sales.length}</strong></span>
+     <span>Total: <strong style="color:var(--gn)">${nisF(total)}</strong></span>`;
+  if(!sales.length){
+    document.getElementById('cb-inv-tbl').innerHTML='<div style="padding:14px;text-align:center;color:var(--mu);font-size:12px">No invoices in this batch yet.</div>';
+  } else {
+    document.getElementById('cb-inv-tbl').innerHTML=tbl(
+      sales.sort((a,c)=>String(a.date).localeCompare(String(c.date))).map(s=>({
+        'Date':dF(s.date),
+        'Customer':s.customer_name||s.customer||'—',
+        'Product':pN(s.product_id)||'—',
+        'Variant':s.variant_label||'—',
+        'Amount':nisF((+s.unit_price||0)*(+s.qty||1)),
+        'Status':pBadge(s.payment_status),
+        'Coll. Date':s.collection_date?dF(s.collection_date):'—'
+      })),false
+    );
+  }
+  openM('m-cb-invoices');
+}
+function openEditBatch(id){
+  const b=DB.collection_batches.find(x=>x.id===id);if(!b)return;
+  document.getElementById('cb-modal-title').textContent='Edit Collection Batch';
+  document.getElementById('cb-edit-id').value=id;
+  document.getElementById('cb-name').value=b.batch_name||'';
+  document.getElementById('cb-date').value=b.collection_date||'';
+  document.getElementById('cb-barcode').value=b.barcode||'';
+  document.getElementById('cb-notes').value=b.notes||'';
+  openM('m-newcb');
+}
+function openNewColBatch(){
+  document.getElementById('cb-modal-title').textContent='New Collection Run';
+  document.getElementById('cb-edit-id').value='';
+  ['cb-name','cb-barcode','cb-notes'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  document.getElementById('cb-date').value=tod();
+  openM('m-newcb');
+}
+function saveColBatch(){
+  const name=document.getElementById('cb-name').value.trim();
+  if(!name){alert('Enter batch name.');return;}
+  const editId=document.getElementById('cb-edit-id').value;
+  if(editId){
+    // Edit existing
+    const b=DB.collection_batches.find(x=>x.id===editId);if(!b)return;
+    b.batch_name=name;
+    b.collection_date=document.getElementById('cb-date').value;
+    b.barcode=document.getElementById('cb-barcode').value;
+    b.notes=document.getElementById('cb-notes').value;
+    dbUpdate('collection_batches', b.id, b);
+  } else {
+    // New batch
+    const row={id:uid(),batch_name:name,collection_date:document.getElementById('cb-date').value,
+      barcode:document.getElementById('cb-barcode').value,notes:document.getElementById('cb-notes').value,
+      total_amount:0,invoice_count:0,status:'Open'};
+    DB.collection_batches.push(row);
+    dbInsert('collection_batches', row);
+  }
+  closeM('m-newcb');renderColBatches();
+}
+function closeBatch(batchId){
+  const b=DB.collection_batches.find(x=>x.id===batchId);if(!b)return;
+  // Find ALL sales assigned to this batch that are still pending
+  const assigned=DB.sales.filter(s=>s.collection_batch_id===batchId&&!isRet(s));
+  const pending=assigned.filter(s=>!isColl(s.payment_status));
+  if(!assigned.length){
+    if(!confirm(`Close "${b.batch_name}" with no invoices?\nYou can still use it as a reference record.`))return;
+    b.status='Closed';b.total_amount=0;b.invoice_count=0;
+    dbUpdate('collection_batches', b.id, b);
+    renderColBatches();return;
+  }
+  const collDate=b.collection_date||tod();
+  if(!confirm(`Close "${b.batch_name}"?\n\n${pending.length} invoices will be marked Collected on ${dF(collDate)}.\nTotal: ${nisF(assigned.reduce((a,s)=>a+(+s.unit_price||0)*(+s.qty||1),0))}`))return;
+  let total=0;
+  assigned.forEach(s=>{
+    s.payment_status='Collected';
+    s.collection_date=collDate;
+    total+=(+s.unit_price||0)*(+s.qty||1);
+    dbUpdate('sales', s.id, s);
+  });
+  b.status='Closed';b.total_amount=total;b.invoice_count=assigned.length;
+  dbUpdate('collection_batches', b.id, b);
+  renderColBatches();renderSales();renderDash();
+}
+function renderColBatches(){
+  // ── COD BATCHES ──────────────────────────────────────────────
+  const allCOD=[...DB.collection_batches].sort((a,b)=>String(b.collection_date||'').localeCompare(String(a.collection_date||'')));
+  const openCOD=allCOD.filter(b=>b.status==='Open');
+  const closedCOD=allCOD.filter(b=>b.status!=='Open');
+
+  const cardsEl=document.getElementById('cb-cards');
+  if(cardsEl){
+    // Active batches as cards
+    if(!openCOD.length){
+      cardsEl.innerHTML='<div style="font-size:12px;color:var(--mu);padding:8px 0">No open COD batches. Create one to start collecting.</div>';
+    } else {
+      cardsEl.innerHTML=openCOD.map(b=>{
+        const bSales=DB.sales.filter(s=>s.collection_batch_id===b.id&&!isRet(s));
+        const bTotal=bSales.reduce((a,s)=>a+(+s.unit_price||0)*(+s.qty||1),0);
+        return`<div class="kc" style="border-top:3px solid var(--gd)">
+          <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:7px">
+            <div>
+              <div style="font-weight:700;font-size:14px">${b.batch_name}</div>
+              <div style="font-size:11px;color:var(--mu)">${b.collection_date?dF(b.collection_date):'No date'}${b.barcode?' · '+b.barcode:''}</div>
+            </div>
+            <span class="b bo">Open</span>
+          </div>
+          <div style="font-size:12px;margin-bottom:9px;display:flex;gap:14px">
+            <span>Invoices: <strong>${bSales.length}</strong></span>
+            <span>Total: <strong>${nisF(bTotal)}</strong></span>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-s btn-sm" onclick="viewBatchInvoices('${b.id}')">📋 View</button>
+            <button class="btn btn-s btn-sm" onclick="openEditBatch('${b.id}')">✏️ Edit</button>
+            <button class="btn btn-p btn-sm" onclick="closeBatch('${b.id}')">✅ Close</button>
+          </div>
+        </div>`;
+      }).join('');
+    }
+  }
+
+  // Closed batches history table
+  const histEl=document.getElementById('cb-history-tbl');
+  const histSearch=document.getElementById('cb-hist-search')?.value?.toLowerCase()||'';
+  if(histEl){
+    const filtered=closedCOD.filter(b=>
+      !histSearch||
+      (b.batch_name||'').toLowerCase().includes(histSearch)||
+      (b.barcode||'').toLowerCase().includes(histSearch)||
+      (b.collection_date||'').includes(histSearch)
+    );
+    if(!filtered.length){
+      histEl.innerHTML='<div style="padding:16px;text-align:center;color:var(--mu);font-size:12px">'+(closedCOD.length?'No results for "'+histSearch+'"':'No closed batches yet.')+'</div>';
+    } else {
+      histEl.innerHTML='<div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Batch Name</th><th>Barcode</th><th>Invoices</th><th>Total</th><th>Status</th><th></th></tr></thead><tbody>'+
+        filtered.map(b=>{
+          const bSales=DB.sales.filter(s=>s.collection_batch_id===b.id&&!isRet(s));
+          const bTotal=bSales.reduce((a,s)=>a+(+s.unit_price||0)*(+s.qty||1),0);
+          return`<tr>
+            <td>${b.collection_date?dF(b.collection_date):'—'}</td>
+            <td><strong>${b.batch_name}</strong></td>
+            <td style="font-size:11px;color:var(--mu)">${b.barcode||'—'}</td>
+            <td>${bSales.length}</td>
+            <td>${nisF(bTotal)}</td>
+            <td><span class="b bg">Closed</span></td>
+            <td><button class="btn btn-s btn-sm" onclick="viewBatchInvoices('${b.id}')">📋 View</button></td>
+          </tr>`;
+        }).join('')
+        +'</tbody></table></div>';
+    }
+  }
+
+  // Pending COD sales
+  const pnd=DB.sales.filter(s=>!isRet(s)&&s.payment_type==='COD'&&!isColl(s.payment_status)).sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  const openBatches=DB.collection_batches.filter(b=>b.status==='Open');
+  const titleEl=document.getElementById('cb-pending-title');
+  if(titleEl)titleEl.textContent='Pending COD Sales ('+pnd.length+')';
+  const sel=document.getElementById('cb-assign-sel');
+  if(sel)sel.innerHTML='<option value="">Select open batch…</option>'+openBatches.map(b=>`<option value="${b.id}">${b.batch_name}</option>`).join('');
+  const sc2=document.getElementById('cb-sum-count');const st=document.getElementById('cb-sum-total');if(sc2)sc2.textContent='0';if(st)st.textContent='₪0';
+  const pndEl=document.getElementById('cb-pending-tbl');
+  if(!pndEl)return;
+  if(!pnd.length){
+    pndEl.innerHTML='<div style="padding:16px;text-align:center;color:var(--gn);font-size:12px">✅ No pending COD sales</div>';
+    return;
+  }
+  pndEl.innerHTML=`<div style="overflow-x:auto"><table><thead><tr>
+    <th><input type="checkbox" onchange="toggleAllCB(this)"></th>
+    <th>Date</th><th>Customer</th><th>Product</th><th>Variant</th><th>Amount</th>
+  </tr></thead><tbody>${
+    pnd.map(s=>`<tr>
+      <td><input type="checkbox" class="cb-check" data-sid="${s.id}" data-amt="${(+s.unit_price||0)*(+s.qty||1)}" onchange="updateCBSum()" style="width:16px;height:16px"></td>
+      <td>${dF(s.date)}</td>
+      <td>${s.customer_name||s.customer||'—'}</td>
+      <td>${pN(s.product_id)||'—'}</td>
+      <td>${s.variant_label||'—'}</td>
+      <td><strong>${nisF((+s.unit_price||0)*(+s.qty||1))}</strong></td>
+    </tr>`).join('')
+  }</tbody></table></div>
+  <div id="cb-live-sum" style="padding:12px 14px;background:var(--nv);color:#fff;border-radius:0 0 8px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+    <div style="font-size:13px">Selected: <strong id="cb-sum-count">0</strong> invoices &nbsp;·&nbsp; Total: <strong id="cb-sum-total" style="font-size:15px;color:var(--gd)">₪0</strong></div>
+    <div style="display:flex;gap:7px;align-items:center">
+      <span style="font-size:11px;opacity:.7">Assign to:</span>
+      ${openBatches.map(b=>`<button class="btn btn-sm" style="background:var(--gd);color:#fff;border:none;cursor:pointer;padding:6px 12px" onclick="assignToBatch('${b.id}')">✅ ${b.batch_name}</button>`).join('')}
+      ${!openBatches.length?'<span style="font-size:11px;opacity:.7">Create a batch first</span>':''}
+    </div>
+  </div>`;
+}
+function toggleAllCB(master){document.querySelectorAll('.cb-check').forEach(cb=>cb.checked=master.checked);}
+function assignToBatch(batchId){
+  const b=DB.collection_batches.find(x=>x.id===batchId);if(!b){alert('Batch not found.');return;}
+  const checked=[...document.querySelectorAll('.cb-check:checked')].map(x=>x.dataset.sid);
+  if(!checked.length){alert('No sales selected.');return;}
+  if(!confirm(`Assign ${checked.length} invoices to "${b.batch_name}"?
+
+They will stay Pending until you close the batch.`))return;
+  checked.forEach(sid=>{
+    const s=DB.sales.find(x=>x.id===sid);if(!s)return;
+    s.collection_batch_id=batchId;
+    dbUpdate('sales', s.id, s);
+  });
+  renderColBatches();
+}
+function invTab(i,el){
+  document.querySelectorAll('#inv-tabs .tab').forEach(t=>t.classList.remove('active'));el.classList.add('active');
+  ['inv-t0','inv-t1','inv-t2'].forEach((id,j)=>document.getElementById(id).style.display=j===i?'block':'none');
+  if(i===1)renderStockCards();if(i===2)renderBatchList();
+}
+function renderInv(){
+  const varStk=DB.variants.filter(v=>getStock(v.id)>0).length;
+  const totU=DB.variants.reduce((a,v)=>a+getStock(v.id),0);
+  const totC=DB.variants.reduce((a,v)=>a+getStock(v.id)*getFifoCost(v.id),0);
+  const totR=DB.variants.reduce((a,v)=>a+getStock(v.id)*(+v.retail||0),0);
+  document.getElementById('inv-nv').textContent=varStk;
+  document.getElementById('inv-nu').textContent=totU;
+  document.getElementById('inv-vc').textContent=nisF(totC);
+  document.getElementById('inv-vr').textContent=nisF(totR);
+  document.getElementById('inv-overview-tbl').innerHTML=tbl(DB.variants.map(v=>{
+    const p=gP(v.product_id);const stk=getStock(v.id);const cost=getFifoCost(v.id);
+    return{'Product':p?.name||'—','Variant':vLabel(v),
+      'Stock':`<span class="b ${stk===0?'br':stk<=(+p?.alert_qty||5)?'bo':'bg'}">${stk}</span>`,
+      'FIFO Cost':isAdmin()?nisF(cost):'—','Retail':nisF(+v.retail||0),'Wholesale':nisF(+v.wholesale||0),
+      'Value@Cost':nisF(stk*cost),'Value@Retail':nisF(stk*(+v.retail||0)),
+      'Batches':DB.batches.filter(b=>b.variant_id===v.id&&b.status==='Active').length};
+  }),false);
+}
+function renderStockCards(){
+  const fpid=document.getElementById('inv-prod-filter').value;
+  const prods=fpid?DB.products.filter(p=>p.id===fpid):DB.products;
+  const container=document.getElementById('stock-cards');container.innerHTML='';
+  prods.forEach(prod=>{
+    const variants=DB.variants.filter(v=>v.product_id===prod.id);
+    const totalStk=variants.reduce((a,v)=>a+getStock(v.id),0);
+    const div=document.createElement('div');div.className='prod-family-card';
+    let varHTML='';
+    variants.forEach(v=>{
+      const stk=getStock(v.id);const cost=getFifoCost(v.id);
+      const batches=DB.batches.filter(b=>b.variant_id===v.id).sort((a,b)=>String(a.shipment_date).localeCompare(String(b.shipment_date)));
+      const costs=batches.flatMap(b=>DB.stock_costs.filter(c=>c.batch_id===b.id));
+      varHTML+=`<div class="variant-row">
+        <div style="flex:1;min-width:180px">
+          <div style="font-weight:600;font-size:12px">${vLabel(v)}</div>
+          <div style="font-size:11px;color:var(--mu)">Retail: ${nisF(+v.retail||0)} · Wholesale: ${nisF(+v.wholesale||0)}</div>
+        </div>
+        <span class="b ${stk===0?'br':stk<=3?'bo':'bg'}">${stk} units</span>
+        <span style="font-size:11px;color:var(--mu)">FIFO: ${nisF(cost)}</span>
+        <button class="btn btn-s btn-sm" onclick="toggleBatchDetail('bd-${v.id}')">📋 Batches (${batches.length})</button>
+      </div>
+      <div id="bd-${v.id}" style="display:none;margin-left:12px;margin-bottom:8px">
+        ${batches.map(b=>{
+          const bCosts=DB.stock_costs.filter(c=>c.batch_id===b.id);
+          const totNis=bCosts.reduce((a,c)=>a+(+c.amount_nis||0),0);
+          const totUsd=bCosts.reduce((a,c)=>a+(+c.amount_usd||0),0);
+          const unitCost=+b.qty_received>0?totNis/+b.qty_received:0;
+          const sc=b.status==='Active'?'var(--gn)':b.status==='Depleted'?'var(--rd)':'var(--or)';
+          return`<div style="border:1px solid var(--bd);border-radius:8px;margin-bottom:8px;overflow:hidden">
+            <div style="background:${sc};color:#fff;padding:7px 12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+              <div><div style="font-weight:700;font-size:12px">${b.shipment_code}</div>
+              <div style="font-size:10px;opacity:.85">${dF(b.shipment_date)} · Rcvd: ${b.qty_received} · Rem: ${b.qty_remaining} · ${b.status}</div></div>
+              ${isAdmin()&&b.status==='Pending'?`<button class="btn btn-sm" style="background:rgba(255,255,255,.25);color:#fff;border:1px solid rgba(255,255,255,.4);cursor:pointer" onclick="openReceiveBatch('${b.id}')">📦 Mark as Received</button>`:''}
+              ${isAdmin()&&b.status==='Active'?`<button class="btn btn-sm" style="background:rgba(255,255,255,.2);color:#fff;border:1px solid rgba(255,255,255,.4);cursor:pointer" onclick="openSplitBatch('${b.id}')">✂️ Split</button>`:''}
+
+              <div style="text-align:right"><div style="font-weight:700">${usdF(totUsd)} / ${nisF(totNis)}</div><div style="font-size:10px;opacity:.85">Unit: ${nisF(unitCost)}</div></div>
+            </div>
+            ${bCosts.length?`<table style="width:100%;border-collapse:collapse;font-size:11px">
+              <tr style="background:var(--bg)"><th style="padding:4px 10px;text-align:left;color:var(--mu);font-size:9px;text-transform:uppercase">Type</th><th style="text-align:left;padding:4px 10px;font-size:9px;color:var(--mu);text-transform:uppercase">Date</th><th style="text-align:right;padding:4px 10px;font-size:9px;color:var(--mu);text-transform:uppercase">USD</th><th style="text-align:right;padding:4px 10px;font-size:9px;color:var(--mu);text-transform:uppercase">NIS</th><th style="padding:4px 10px;font-size:9px;color:var(--mu);text-transform:uppercase">Remark</th></tr>
+              ${bCosts.map(c=>`<tr style="border-top:1px solid var(--bd)"><td style="padding:4px 10px"><span class="b bb" style="font-size:9px">${c.cost_type}</span></td><td style="padding:4px 10px">${dF(c.payment_date)}</td><td style="padding:4px 10px;text-align:right">${usdF(+c.amount_usd||0)}</td><td style="padding:4px 10px;text-align:right;font-weight:600">${nisF(+c.amount_nis||0)}</td><td style="padding:4px 10px;color:var(--mu)">${c.remark||'—'}</td></tr>`).join('')}
+              <tr style="border-top:2px solid var(--bd);background:var(--bg);font-weight:700"><td colspan="2" style="padding:5px 10px">Total</td><td style="padding:5px 10px;text-align:right">${usdF(totUsd)}</td><td style="padding:5px 10px;text-align:right;color:var(--nv)">${nisF(totNis)}</td><td><button class="btn btn-s btn-sm" onclick="openCostForBatch('${b.id}','${prod.id}')">+Cost</button></td></tr>
+            </table>`:`<div style="padding:8px 12px;font-size:11px;color:var(--mu);display:flex;justify-content:space-between;align-items:center">No cost lines yet.<button class="btn btn-s btn-sm" onclick="openCostForBatch('${b.id}','${prod.id}')">+ Add Cost</button></div>`}
+          </div>`;
+        }).join('')}
+        <button class="btn btn-s btn-sm" onclick="openBatchForVariant('${v.id}','${prod.id}')">+ Add Batch for this variant</button>
+      </div>`;
+    });
+    div.innerHTML=`<div class="pfc-hdr" onclick="toggleFamilyCard('fc-${prod.id}')">
+      <div><h3>${prod.name}</h3><span style="font-size:11px;opacity:.7">${prod.category} · ${prod.source} · ${variants.length} variant${variants.length!==1?'s':''}</span></div>
+      <div style="text-align:right"><div style="font-size:18px;font-weight:700">${totalStk} units</div>
+      <div style="font-size:10px;opacity:.7">Value: ${nisF(variants.reduce((a,v)=>a+getStock(v.id)*getFifoCost(v.id),0))}</div></div>
+    </div>
+    <div class="pfc-body" id="fc-${prod.id}" style="display:none">
+      ${varHTML}
+      <button class="btn btn-s btn-sm" style="margin-top:6px" onclick="openAddVariant('${prod.id}')">+ Add Variant</button>
+    </div>`;
+    container.appendChild(div);
+  });
+}
+function toggleBatchDetail(id){const e=document.getElementById(id);if(e)e.style.display=e.style.display==='none'?'block':'none';}
+function toggleFamilyCard(id){const e=document.getElementById(id);if(e)e.style.display=e.style.display==='none'?'block':'none';}
+function openCostForBatch(batchId,prodId){openM('m-addcost');const pe=document.getElementById('ac-prod');if(pe){pe.value=prodId;onACProdChange(batchId);}}
+function openBatchForVariant(varId,prodId){openM('m-newbatch');const pe=document.getElementById('nb-prod');if(pe){pe.value=prodId;onNBProdChange();setTimeout(()=>{document.getElementById('nb-variant').value=varId;},50);}}
+function renderBatchList(){
+  document.getElementById('batches-tbl').innerHTML=tbl([...DB.batches].sort((a,b)=>String(b.shipment_date).localeCompare(String(a.shipment_date))).map(b=>{
+    const v=gV(b.variant_id);const p=gP(b.product_id||v?.product_id);
+    const costs=DB.stock_costs.filter(c=>c.batch_id===b.id);
+    const totNis=costs.reduce((a,c)=>a+(+c.amount_nis||0),0);
+    return{'Code':b.shipment_code,'Date':dF(b.shipment_date),'Product':p?.name||'—','Variant':v?vLabel(v):'—',
+      'Rcvd':b.qty_received,'Rem':b.qty_remaining,
+      'Status':`<span class="b ${b.status==='Active'?'bg':b.status==='Depleted'?'br':'bo'}">${b.status}</span>`,
+      'Costs':costs.length,'Total NIS':nisF(totNis),'Unit':+b.qty_received>0?nisF(totNis/+b.qty_received):'—'};
+  }),false);
+}
+function addBatch(){
+  const pid=document.getElementById('nb-prod').value;
+  const vid=document.getElementById('nb-variant').value;
+  const code=document.getElementById('nb-code').value.trim();
+  if(!vid||!code){alert('Select variant and enter shipment code.');return;}
+  const qty=+(document.getElementById('nb-qty').value||0);
+  const row={id:uid(),variant_id:vid,product_id:pid,shipment_code:code,shipment_date:document.getElementById('nb-date').value,
+    qty_received:qty,qty_remaining:qty,status:document.getElementById('nb-status').value,
+    total_cost_usd:0,total_cost_nis:0,unit_cost_nis:0};
+  DB.batches.push(row);pushRow('batches',row);closeM('m-newbatch');renderInv();
+}
+function onNBProdChange(){
+  const pid=document.getElementById('nb-prod').value;
+  const vSel=document.getElementById('nb-variant');
+  vSel.innerHTML='<option value="">— select variant —</option>'+DB.variants.filter(v=>v.product_id===pid).map(v=>`<option value="${v.id}">${vLabel(v)}</option>`).join('');
+}
+function onACProdChange(prefillBatch){
+  const pid=document.getElementById('ac-prod').value;
+  const bSel=document.getElementById('ac-batch');
+  const batches=DB.batches.filter(b=>b.product_id===pid||DB.variants.find(v=>v.id===b.variant_id&&v.product_id===pid));
+  bSel.innerHTML='<option value="">— select batch —</option>'+batches.map(b=>`<option value="${b.id}">${b.shipment_code} (${dF(b.shipment_date)})</option>`).join('');
+  if(prefillBatch)bSel.value=prefillBatch;
+}
+function calcNIS(){
+  const u=+(document.getElementById('ac-usd')?.value||0);
+  const r=+(document.getElementById('ac-rate')?.value||3.7);
+  const ne=document.getElementById('ac-nis');if(ne)ne.value=(u*r).toFixed(2);
+}
+function addCostLine(){
+  const bid=document.getElementById('ac-batch').value;
+  const pid=document.getElementById('ac-prod').value;
+  if(!bid){alert('Select a batch.');return;}
+  const b=DB.batches.find(x=>x.id===bid);
+  const usd=+(document.getElementById('ac-usd').value||0);
+  const nis=+(document.getElementById('ac-nis').value||0);
+  const row={id:uid(),batch_id:bid,variant_id:b?.variant_id||'',product_id:pid,
+    cost_type:document.getElementById('ac-type').value,
+    payment_date:document.getElementById('ac-date').value,
+    amount_usd:usd,amount_nis:nis,remark:document.getElementById('ac-rmk').value};
+  DB.stock_costs.push(row);pushRow('stock_costs',row);
+  recalcBatch(bid);closeM('m-addcost');renderInv();
+  if(document.getElementById('inv-t1').style.display!=='none')renderStockCards();
+}
+
+// ═══ PRODUCTS & VARIANTS ═════════════════════════════════════
+function addProduct(){
+  const name=document.getElementById('pr-nm').value.trim();if(!name){alert('Enter name.');return;}
+  const row={id:uid(),name,category:document.getElementById('pr-cat').value,source:document.getElementById('pr-src').value,
+    unit:document.getElementById('pr-unit').value,alert_qty:+(document.getElementById('pr-alrt').value||5),
+    min_margin_pct:+(document.getElementById('pr-margin').value||15)};
+  DB.products.push(row);pushRow('products',row);closeM('m-prod');renderProds();
+}
+function openAddVariant(pid){
+  document.getElementById('av-pid').value=pid;
+  document.getElementById('addvar-title').textContent='Add Variant — '+pN(pid);
+  const sel=document.getElementById('av-prod');sel.innerHTML=`<option value="${pid}">${pN(pid)}</option>`;sel.value=pid;
+  // Populate from VEHICLES catalog (all defined makes)
+  const avMake=document.getElementById('av-make');
+  const allCatMakes=Object.keys(VEHICLES).sort();
+  avMake.innerHTML='<option value="">— none (accessory) —</option>'+allCatMakes.map(m=>`<option value="${m}">${m}</option>`).join('');
+  // Reset model and fields
+  document.getElementById('av-model').innerHTML='<option value="">— select make first —</option>';
+  ['av-yfrom','av-ret','av-whl'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  document.getElementById('av-yto').value=2099;
+  document.getElementById('av-margin').value=15;
+  document.getElementById('av-set').value='';
+  openM('m-addvar');
+}
+function onAVMakeChange(){
+  const make=document.getElementById('av-make').value;
+  const mSel=document.getElementById('av-model');
+  mSel.innerHTML='<option value="">— select model —</option>';
+  if(make){
+    // Use VEHICLES catalog first, fall back to existing variants
+    const catModels=VEHICLES[make]||[];
+    const varModels=getModelsForMake(make);
+    const allModels=[...new Set([...catModels,...varModels])].sort();
+    allModels.forEach(m=>{const o=document.createElement('option');o.value=m;o.textContent=m;mSel.appendChild(o);});
+  }
+}
+function saveVariant(){
+  const pid=document.getElementById('av-pid').value;if(!pid)return;
+  const make=document.getElementById('av-make').value;
+  const model=document.getElementById('av-model').value;
+  const row={id:uid(),product_id:pid,car_make:make,car_model:model,
+    year_from:+(document.getElementById('av-yfrom').value||0),year_to:+(document.getElementById('av-yto').value||2099),
+    set_type:document.getElementById('av-set').value,
+    retail:+(document.getElementById('av-ret').value||0),wholesale:+(document.getElementById('av-whl').value||0),
+    min_margin_pct:+(document.getElementById('av-margin').value||15),
+    stock_qty:0,avg_cost_nis:0};
+  DB.variants.push(row);pushRow('variants',row);
+  // Stock enters via Inventory batches or Purchases — not here
+  closeM('m-addvar');populateSels();renderProds();
+}
+function renderProds(){
+  const container=document.getElementById('prod-cards');if(!container)return;
+  container.innerHTML='';
+  DB.products.forEach(prod=>{
+    const variants=DB.variants.filter(v=>v.product_id===prod.id);
+    const div=document.createElement('div');div.className='prod-family-card';
+    div.innerHTML=`<div class="pfc-hdr" onclick="toggleFamilyCard('pp-${prod.id}')">
+      <div><h3>${prod.name}</h3><span style="font-size:11px;opacity:.7">${prod.category} · ${prod.source} · ${variants.length} variant${variants.length!==1?'s':''}</span></div>
+      <span class="b bx">${prod.unit}</span>
+    </div>
+    <div class="pfc-body" id="pp-${prod.id}" style="display:none">
+      ${variants.map(v=>`<div class="variant-row">
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:12px">${vLabel(v)||'Base Variant'}</div>
+          <div style="font-size:11px;color:var(--mu)">Retail: ${nisF(+v.retail||0)} · Wholesale: ${nisF(+v.wholesale||0)} · Min margin: ${v.min_margin_pct||15}%</div>
+          <div style="font-size:11px;color:var(--mu)">Stock: <strong>${getStock(v.id)}</strong> · FIFO cost: ${nisF(getFifoCost(v.id))}</div>
+        </div>
+      </div>`).join('')}
+      <button class="btn btn-s btn-sm" style="margin-top:6px" onclick="openAddVariant('${prod.id}')">+ Add Variant / Compatible Car</button>
+    </div>`;
+    container.appendChild(div);
+  });
+}
+
+// ═══ PURCHASES ═══════════════════════════════════════════════
+function addPurchase(){
+  const pid=document.getElementById('pu-prod').value;
+  const vid=document.getElementById('pu-variant').value;
+  const qty=+(document.getElementById('pu-qty').value||1);
+  const cost=+(document.getElementById('pu-cost').value||0);
+  const supId=document.getElementById('pu-supplier-id').value;
+  if(!pid||!cost){alert('Select product and enter cost.');return;}
+  if(!supId){alert('Select a supplier.');return;}
+  const sup=gSup(supId);
+  const bCode='LOCAL-'+Date.now();
+  // Create inventory batch
+  const b={id:uid(),variant_id:vid||'',product_id:pid,supplier_id:supId,
+    shipment_code:bCode,shipment_date:document.getElementById('pu-date').value,
+    qty_received:qty,qty_remaining:qty,status:'Active',
+    total_cost_usd:0,total_cost_nis:cost*qty,unit_cost_nis:cost};
+  DB.batches.push(b);pushRow('batches',b);
+  // Create stock cost line linked to supplier
+  const cl={id:uid(),batch_id:b.id,variant_id:vid||'',product_id:pid,supplier_id:supId,
+    cost_type:'Purchase',payment_date:document.getElementById('pu-date').value,
+    amount_usd:0,amount_nis:cost*qty,remark:'Local purchase — '+(sup?sup.name:'')};
+  DB.stock_costs.push(cl);pushRow('stock_costs',cl);
+  // Create purchase record
+  const row={id:uid(),date:document.getElementById('pu-date').value,
+    product_id:pid,variant_id:vid||'',batch_id:b.id,supplier_id:supId,
+    qty,unit_cost:cost,total_cost:cost*qty,
+    status:document.getElementById('pu-stat').value,
+    remark:document.getElementById('pu-rmk').value};
+  if(!DB.purchases)DB.purchases=[];
+  DB.purchases.push(row);pushRow('purchases',row);
+  closeM('m-pur');renderPur();renderSuppliers();renderDash();
+}
+function onPurSupChange(){
+  const id=document.getElementById('pu-supplier-id').value;
+  const el=document.getElementById('pu-sup-bal');if(!el)return;
+  if(!id){el.textContent='';return;}
+  const s=gSup(id);if(!s)return;
+  const bal=getSupBal(id);
+  el.innerHTML=`Current balance owed: <strong style="color:${bal>0?'var(--rd)':'var(--gn)'}">${nisF(bal)}</strong>`;
+}
+function onPurProdChange(){
+  const pid=document.getElementById('pu-prod').value;
+  const vSel=document.getElementById('pu-variant');
+  vSel.innerHTML='<option value="">— select variant (optional) —</option>'+DB.variants.filter(v=>v.product_id===pid).map(v=>`<option value="${v.id}">${vLabel(v)}</option>`).join('');
+}
+function renderPur(){
+  if(!DB.purchases)DB.purchases=[];
+  const list=[...DB.purchases].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
+  const total=list.reduce((a,p)=>a+(+p.total_cost||0)||(+p.unit_cost||0)*(+p.qty||0),0);
+  const paid=list.filter(p=>p.status==='Paid').reduce((a,p)=>a+(+p.total_cost||0)||(+p.unit_cost||0)*(+p.qty||0),0);
+  document.getElementById('pur-summary').innerHTML=
+    `Total: <strong>${nisF(total)}</strong> &nbsp;·&nbsp; <span class="apos">Paid: ${nisF(paid)}</span> &nbsp;·&nbsp; <span class="aneg">Pending: ${nisF(total-paid)}</span>`;
+  document.getElementById('pur-tbl').innerHTML=tbl(list.map(p=>{
+    const sup=gSup(p.supplier_id);
+    const tot=(+p.total_cost||0)||((+p.unit_cost||0)*(+p.qty||0));
+    return{
+      'Date':dF(p.date),
+      'Supplier':sup?`<span class="b ${sup.type==='Overseas'?'bb':'bgd'}">${sup.name}</span>`:'—',
+      'Product':pN(p.product_id)||'—',
+      'Qty':p.qty||0,
+      'Unit Cost':nisF(+p.unit_cost||0),
+      'Total':nisF(tot),
+      'Status':`<span class="b ${p.status==='Paid'?'bg':'bo'}">${p.status||'Pending'}</span>`,
+      'Remark':p.remark||''
+    };
+  }),false);
+}
+function openAddWC(){
+  document.getElementById('wc-modal-title').textContent='Add Wholesale Customer';
+  document.getElementById('wc-edit-id').value='';
+  ['wc-nm','wc-ph','wc-notes'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  document.getElementById('wc-limit').value=0;
+  document.getElementById('wc-days').value=30;
+  const d=document.getElementById('wc-disc');if(d)d.value=0;
+  const pu=document.getElementById('wc-portal-user');if(pu)pu.value='';
+  const pp=document.getElementById('wc-portal-pin');if(pp)pp.value='';
+  const pa=document.getElementById('wc-portal-active');if(pa)pa.value='true';
+  openM('m-wc');
+}
+function openEditWC(id){
+  const c=DB.wholesale_customers.find(x=>x.id===id);if(!c)return;
+  document.getElementById('wc-modal-title').textContent='Edit: '+c.name;
+  document.getElementById('wc-edit-id').value=id;
+  document.getElementById('wc-nm').value=c.name||'';
+  document.getElementById('wc-ph').value=c.phone||'';
+  document.getElementById('wc-limit').value=+c.credit_limit_nis||0;
+  document.getElementById('wc-days').value=+c.credit_days||30;
+  const d=document.getElementById('wc-disc');if(d)d.value=+c.discount_pct||0;
+  document.getElementById('wc-notes').value=c.notes||'';
+  const pu=document.getElementById('wc-portal-user');if(pu)pu.value=c.portal_username||c.name.toLowerCase().replace(/\s+/g,'');
+  const pp=document.getElementById('wc-portal-pin');if(pp)pp.value='';
+  const pa=document.getElementById('wc-portal-active');if(pa)pa.value=c.portal_active===false?'false':'true';
+  openM('m-wc');
+}
+async function saveWC(){
+  const name=document.getElementById('wc-nm').value.trim();if(!name){alert('Enter name.');return;}
+  const editId=document.getElementById('wc-edit-id').value;
+  const portalUser=(document.getElementById('wc-portal-user')?.value||'').trim().toLowerCase();
+  const portalPin=document.getElementById('wc-portal-pin')?.value||'';
+  const portalActive=document.getElementById('wc-portal-active')?.value!=='false';
+  if(portalPin&&portalPin.length<4){alert('Portal password must be at least 4 characters.');return;}
+  const row={id:editId||uid(),name,
+    phone:document.getElementById('wc-ph').value,
+    credit_limit_nis:parseFloat(document.getElementById('wc-limit').value)||0,
+    credit_days:parseInt(document.getElementById('wc-days').value)||30,
+    discount_pct:parseFloat(document.getElementById('wc-disc')?.value)||0,
+    notes:document.getElementById('wc-notes').value,
+    portal_username:portalUser||name.toLowerCase().replace(/\s+/g,''),
+    portal_active:portalActive};
+  showLoader('Saving…');
+  try{
+    if(editId){
+      const idx=DB.wholesale_customers.findIndex(x=>x.id===editId);
+      if(idx>=0)DB.wholesale_customers[idx]={...DB.wholesale_customers[idx],...row};
+      await sbFetch('/rest/v1/wholesale_customers?id=eq.'+editId,{method:'PATCH',body:JSON.stringify(row)},true);
+    }else{
+      DB.wholesale_customers.push(row);
+      await sbInsert('wholesale_customers',row);
+    }
+    // Hash and save password via RPC if provided
+    if(portalPin){
+      await sbFetch('/rest/v1/rpc/update_portal_password',{
+        method:'POST',body:JSON.stringify({p_customer_id:row.id,p_password:portalPin})
+      },true);
+    }
+    hideLoader();
+    closeM('m-wc');populateSels();renderWholesale();
+  }catch(e){hideLoader();alert('❌ Error: '+e.message);}
+}
+function renderWholesale(){
+  const cards=document.getElementById('wc-cards');
+  if(!DB.wholesale_customers.length){cards.innerHTML='<div class="al al-i" style="grid-column:1/-1">No wholesale customers yet.</div>';document.getElementById('wc-stmt').innerHTML='';return;}
+  cards.innerHTML=DB.wholesale_customers.map(c=>{
+    const bal=getWCBal(c.id),lim=+c.credit_limit_nis||0,avail=lim-bal,od=getWCOverdue(c.id);
+    const pct=lim?Math.min(bal/lim*100,100):0;
+    return`<div class="kc" style="border-top:3px solid var(--nv)">
+      <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:9px">
+        <div><div style="font-weight:700;font-size:14px">${c.name}</div>
+        <div style="font-size:11px;color:var(--mu)">${c.phone||'—'} · ${c.credit_days||30} day terms</div></div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-s btn-sm" onclick="document.getElementById('wc-stmt-sel').value='${c.id}';renderWCStmt()">Statement</button>
+          ${isAdmin()?`<button class="btn btn-s btn-sm" onclick="openEditWC('${c.id}')">✏️ Edit</button>`:''}
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:9px;font-size:12px">
+        <div><div style="font-size:10px;color:var(--mu);text-transform:uppercase">Outstanding</div><div style="font-weight:700;color:${bal>0?'var(--rd)':'var(--gn)'};">${nisF(bal)}</div></div>
+        <div><div style="font-size:10px;color:var(--mu);text-transform:uppercase">Credit Limit</div><div style="font-weight:700">${nisF(lim)}</div></div>
+        <div><div style="font-size:10px;color:var(--mu);text-transform:uppercase">Available</div><div style="font-weight:700;color:${avail>0?'var(--gn)':'var(--rd)'};">${nisF(avail)}</div></div>
+        <div><div style="font-size:10px;color:var(--mu);text-transform:uppercase">Overdue</div><div style="font-weight:700;color:${od>0?'var(--rd)':'var(--gn)'};">${od>0?nisF(od):'None'}</div></div>
+      </div>
+      <div class="credit-bar"><div class="credit-fill" style="width:${pct.toFixed(1)}%;background:${pct>90?'var(--rd)':pct>70?'var(--or)':'var(--gn)'}"></div></div>
+      <div style="font-size:10px;color:var(--mu);margin-top:2px">${pct.toFixed(0)}% of limit used</div>
+      ${od>0?`<div class="al al-r" style="margin-top:7px;padding:6px 10px;font-size:11px">⚠️ Overdue: ${nisF(od)}</div>`:''}
+    </div>`;
+  }).join('');
+  renderWCStmt();
+  renderReservations();
+}
+function renderWCStmt(){
+  const id=document.getElementById('wc-stmt-sel').value;
+  const el=document.getElementById('wc-stmt');
+  if(!id||!el){if(el)el.innerHTML='<div style="padding:14px;text-align:center;color:var(--mu);font-size:12px">Select a customer above.</div>';return;}
+  const wc=gWC(id);if(!wc){el.innerHTML='';return;}
+  const sales=DB.sales.filter(s=>s.customer_id===id&&!isRet(s)).sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  let running=0;
+  const rows=sales.map(s=>{
+    const amt=(+s.unit_price||0)*(+s.qty||1);
+    const paid=isColl(s.payment_status)?amt:0;
+    running+=amt-paid;
+    return{'Date':dF(s.date),'Product':pN(s.product_id),'Variant':s.variant_label||'—',
+      'Invoice':nisF(amt),'Collected':paid>0?`<span class="apos">${nisF(paid)}</span>`:'—',
+      'Balance':`<span class="${running>0?'aneg':'apos'}">${nisF(running)}</span>`,
+      'Status':pBadge(s.payment_status),'Coll.Date':s.collection_date?dF(s.collection_date):'—'};
+  });
+  const bal=getWCBal(id),lim=+wc.credit_limit_nis||0,od=getWCOverdue(id);
+  el.innerHTML=`<div id="stmt-print-area">
+    <div style="padding:10px 14px;background:var(--bg);border-bottom:1px solid var(--bd);display:flex;gap:18px;flex-wrap:wrap;font-size:12px">
+      <span>Customer: <strong>${wc.name}</strong></span><span>Limit: <strong>${nisF(lim)}</strong></span>
+      <span>Balance: <strong class="${bal>0?'aneg':'apos'}">${nisF(bal)}</strong></span>
+      <span>Overdue: <strong class="${od>0?'aneg':'apos'}">${od>0?nisF(od):'None'}</strong></span>
+      <span>Terms: <strong>${wc.credit_days||30} days</strong></span>
+    </div>
+    ${tbl(rows,false)}
+  </div>`;
+}
+function printStatement(){
+  const area=document.getElementById('stmt-print-area');if(!area){alert('Select a customer first.');return;}
+  const w=window.open('','_blank','width=800,height=600');
+  w.document.write(`<!DOCTYPE html><html><head><title>Statement</title>
+    <style>body{font-family:Arial,sans-serif;padding:20px;font-size:12px}table{width:100%;border-collapse:collapse}
+    th,td{padding:6px 10px;border:1px solid #ddd;text-align:left}th{background:#1B2A4A;color:#fff}
+    .aneg{color:#C0392B;font-weight:600}.apos{color:#1A8C5B;font-weight:600}</style></head><body>
+    <h2 style="color:#1B2A4A">Copra — Statement of Account</h2>${area.innerHTML}</body></html>`);
+  w.document.close();w.print();
+}
+
+// ═══ EXPENSES ═══════════════════════════════════════════════
+function expTab(i,el){document.querySelectorAll('.tabs .tab').forEach(t=>t.classList.remove('active'));el.classList.add('active');document.getElementById('exp-t0').style.display=i===0?'block':'none';document.getElementById('exp-t1').style.display=i===1?'block':'none';}
+function addExpense(){
+  const amt=+(document.getElementById('ex-amt').value||0);const desc=document.getElementById('ex-desc').value.trim();
+  if(!desc||!amt){alert('Enter description and amount.');return;}
+  const row={id:uid(),date:document.getElementById('ex-date').value,desc,category:document.getElementById('ex-cat').value,amount:amt,project:document.getElementById('ex-proj').value};
+  DB.expenses.push(row);pushRow('expenses',row);closeM('m-exp');renderExp();
+}
+function renderExp(){
+  const ops=DB.expenses.filter(e=>e.category!=='Stock Purchase');
+  const sp=DB.expenses.filter(e=>e.category==='Stock Purchase');
+  const tot=ops.reduce((a,e)=>a+(+e.amount||0),0);
+  const mkt=ops.filter(e=>e.category==='Marketing').reduce((a,e)=>a+(+e.amount||0),0);
+  const ov=ops.filter(e=>e.category==='Operations').reduce((a,e)=>a+(+e.amount||0),0);
+  document.getElementById('exp-tot').textContent=nisF(tot);
+  document.getElementById('exp-mkt').textContent=nisF(mkt);
+  document.getElementById('exp-ops').textContent=nisF(ov);
+  document.getElementById('exp-oth').textContent=nisF(tot-mkt-ov);
+  document.getElementById('exp-tbl').innerHTML=tbl(ops.sort((a,b)=>String(b.date).localeCompare(String(a.date))).map(e=>({'Date':dF(e.date),'Description':e.desc,'Category':`<span class="b ${e.category==='Marketing'?'bgd':e.category==='Operations'?'bb':'bx'}">${e.category}</span>`,'Amount':`<span class="aneg">${nisF(+e.amount||0)}</span>`,'Project':e.project||'—'})),false);
+  document.getElementById('sp-tot').textContent=nisF(sp.reduce((a,e)=>a+(+e.amount||0),0));
+  document.getElementById('sp-tbl').innerHTML=tbl(sp.sort((a,b)=>String(b.date).localeCompare(String(a.date))).map(e=>({'Date':dF(e.date),'Description':e.desc,'Amount':`<span class="aneg">${nisF(+e.amount||0)}</span>`,'Project':e.project||'—'})),false);
+}
+
+// ═══ PARTNER PAYMENTS ════════════════════════════════════════
+function addPayment(){
+  const amt=+(document.getElementById('pay-amt').value||0);if(!amt){alert('Enter amount.');return;}
+  const row={id:uid(),date:document.getElementById('pay-date').value,partner:document.getElementById('pay-par').value,amount:amt,remark:document.getElementById('pay-rmk').value};
+  DB.payments.push(row);pushRow('payments',row);closeM('m-pay');renderPay();renderDash();
+}
+function renderPay(){
+  const cP=name=>{
+    const o=DB.purchases.filter(p=>p.payment===`Credit/${name}`).reduce((a,p)=>a+(+p.unit_cost||0)*(+p.qty||0),0);
+    const pd=DB.payments.filter(p=>p.partner===name).reduce((a,p)=>a+(+p.amount||0),0);
+    return{o,pd,b:o-pd};
+  };
+  document.getElementById('partner-cards').innerHTML=['Saleem','Saed'].map(name=>{
+    const{o,pd,b}=cP(name);const pct=o?Math.min(pd/o*100,100):0;
+    return`<div class="kc" style="border-top:3px solid var(--nv)"><div style="display:flex;justify-content:space-between">
+      <div><div class="kl">${name}</div><div class="kv">${nisF(o)}</div><div class="ks">Credit used</div></div>
+      <div style="text-align:right"><div class="kl">Paid</div><div style="font-size:18px;font-weight:700;color:var(--gn)">${nisF(pd)}</div></div></div>
+      <div style="margin-top:9px"><div class="br-trk" style="height:6px;border-radius:3px"><div class="br-fil" style="width:${pct.toFixed(1)}%;background:${b>0?'var(--gd)':'var(--gn)'};height:100%;border-radius:3px"></div></div>
+      <div style="display:flex;justify-content:space-between;margin-top:3px;font-size:11px"><span style="color:var(--mu)">${pct.toFixed(0)}% paid</span><span style="font-weight:600;color:${b>0?'var(--rd)':'var(--gn)'}">${b>0?'Owe '+nisF(b):'Settled ✓'}</span></div></div></div>`;
+  }).join('');
+  document.getElementById('pay-tbl').innerHTML=tbl([...DB.payments].sort((a,b)=>String(b.date).localeCompare(String(a.date))).map(p=>({'Date':dF(p.date),'Partner':`<span class="b bx">${p.partner}</span>`,'Amount':nisF(+p.amount||0),'Remark':p.remark||'—'})),false);
+}
+
+// ═══ CUSTOMERS ═══════════════════════════════════════════════
+function renderCusts(){
+  const q=(document.getElementById('cq')?.value||'').toLowerCase();
+  const ft=document.getElementById('ct')?.value||'';
+  const map={};
+  DB.sales.filter(s=>!isRet(s)&&(s.customer_name||s.customer)).forEach(s=>{
+    const k=s.customer_name||s.customer;
+    if(!map[k])map[k]={name:k,orders:0,total:0,type:s.sale_type||'Retail',last:''};
+    map[k].orders++;map[k].total+=(+s.unit_price||0)*(+s.qty||1);
+    if(s.sale_type==='Wholesale')map[k].type='Wholesale';
+    if(!map[k].last||String(s.date)>map[k].last)map[k].last=s.date;
+  });
+  let list=Object.values(map).sort((a,b)=>b.total-a.total);
+  if(q)list=list.filter(c=>c.name.toLowerCase().includes(q));
+  if(ft)list=list.filter(c=>c.type===ft);
+  document.getElementById('cust-cnt').textContent=list.length+' customers';
+  document.getElementById('cust-tbl').innerHTML=tbl(list.map(c=>({'Name':c.name,'Orders':c.orders,'Revenue':nisF(c.total),'Avg':nisF(c.total/c.orders),'Type':`<span class="b ${c.type==='Wholesale'?'bb':'bg'}">${c.type}</span>`,'Last Sale':dF(c.last)})),false);
+}
+
+// ═══ EXCEL EXPORT ════════════════════════════════════════════
+function exportExcel(type){
+  let data=[],name='export';
+  if(type==='sales'){
+    data=DB.sales.map(s=>({Date:dF(s.date),Customer:s.customer_name||s.customer||'',Product:pN(s.product_id),Variant:s.variant_label||'',Qty:s.qty,Price:+s.unit_price||0,Cost:+s.unit_cost_nis||0,GP:+s.gp_nis||0,'Pay Type':s.payment_type||'','Pay Status':s.payment_status||'','Coll.Date':s.collection_date?dF(s.collection_date):'','Sale Type':s.sale_type||'','Car Make':s.car_make||'','Car Model':s.car_model||'','Set Type':s.set_type||'',Remark:s.remark||''}));
+    name='Sales';
+  } else if(type==='inventory'){
+    data=DB.variants.map(v=>{const p=gP(v.product_id);return{Product:p?.name||'',Variant:vLabel(v),'Car Make':v.car_make||'','Car Model':v.car_model||'','Year From':v.year_from||'','Year To':v.year_to||'','Set Type':v.set_type||'',Stock:getStock(v.id),'FIFO Cost':getFifoCost(v.id),Retail:+v.retail||0,Wholesale:+v.wholesale||0,'Min Margin%':v.min_margin_pct||15};});
+    name='Inventory';
+  } else if(type==='expenses'){
+    data=DB.expenses.map(e=>({Date:dF(e.date),Description:e.desc,Category:e.category,Amount:+e.amount||0,Project:e.project||''}));
+    name='Expenses';
+  } else if(type==='payments'){
+    data=DB.payments.map(p=>({Date:dF(p.date),Partner:p.partner,Amount:+p.amount||0,Remark:p.remark||''}));
+    name='Payments';
+  } else if(type==='purchases'){
+    data=DB.purchases.map(p=>({Date:dF(p.date),Product:pN(p.product_id),Qty:p.qty,'Unit Cost':+p.unit_cost||0,Total:(+p.unit_cost||0)*(+p.qty||0),Payment:p.payment,Status:p.status||'',Remark:p.remark||''}));
+    name='Purchases';
+  } else if(type==='wholesale_customers'){
+    data=DB.wholesale_customers.map(c=>({Name:c.name,Phone:c.phone||'','Credit Limit (NIS)':+c.credit_limit_nis||0,'Credit Days':+c.credit_days||30,Balance:getWCBal(c.id),Overdue:getWCOverdue(c.id),Notes:c.notes||''}));
+    name='WholesaleCustomers';
+  } else if(type==='variants'){
+    data=DB.variants.map(v=>{const p=gP(v.product_id);return{Product:p?.name||'',Variant:vLabel(v),'Car Make':v.car_make||'','Car Model':v.car_model||'','Year From':v.year_from||'','Year To':v.year_to||'','Set Type':v.set_type||'',Retail:+v.retail||0,Wholesale:+v.wholesale||0,'Min Margin%':v.min_margin_pct||15,Stock:getStock(v.id)};});
+    name='Variants';
+  } else if(type==='collection_batches'){
+    data=DB.collection_batches.map(b=>({'Batch Name':b.batch_name,'Collection Date':b.collection_date?dF(b.collection_date):'',Barcode:b.barcode||'',Status:b.status,Invoices:b.invoice_count||0,Amount:+b.total_amount||0,Notes:b.notes||''}));
+    name='CollectionBatches';
+  } else if(type==='customers'){
+    const map={};DB.sales.filter(s=>!isRet(s)&&(s.customer_name||s.customer)).forEach(s=>{const k=s.customer_name||s.customer;if(!map[k])map[k]={name:k,orders:0,total:0,type:s.sale_type||'Retail',last:''};map[k].orders++;map[k].total+=(+s.unit_price||0)*(+s.qty||1);if(s.sale_type==='Wholesale')map[k].type='Wholesale';if(!map[k].last||String(s.date)>map[k].last)map[k].last=s.date;});
+    data=Object.values(map).sort((a,b)=>b.total-a.total).map(c=>({Name:c.name,Orders:c.orders,Revenue:c.total,Avg:+(c.total/c.orders).toFixed(2),Type:c.type,'Last Sale':dF(c.last)}));
+    name='Customers';
+  }
+  if(type==='suppliers'){
+    const d=(DB.suppliers||[]).map(s=>({Name:s.name,Type:s.type,Phone:s.phone||'','Credit Limit':+s.credit_limit_nis||0,Balance:getSupBal(s.id),Notes:s.notes||''}));
+    if(!d.length){alert('No suppliers.');return;}
+    const ws=XLSX.utils.json_to_sheet(d);const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,'Suppliers');
+    XLSX.writeFile(wb,'ZAuto_Suppliers.xlsx');return;
+  }
+  if(!data.length){alert('No data to export.');return;}
+  const ws=XLSX.utils.json_to_sheet(data);
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,name);
+  XLSX.writeFile(wb,`ZAuto_${name}_${new Date().toISOString().split('T')[0]}.xlsx`);
+}
+
+// ═══ MODALS ══════════════════════════════════════════════════
+function openM(id){
+  if(id==='m-handover'){openHandoverModal&&openHandoverModal();document.getElementById('m-handover')?.classList.add('open');return;}
+  populateSels();
+  const d=tod();
+  ['s-date','r-date','cb-date','nb-date','ac-date','pu-date','ex-date','pay-date'].forEach(f=>{const e=document.getElementById(f);if(e&&!e.value)e.value=d;});
+  document.getElementById(id)?.classList.add('open');
+}
+function closeM(id){document.getElementById(id)?.classList.remove('open');}
+document.querySelectorAll('.mo').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open');}));
+
+// ═══ GAS DOWNLOAD ════════════════════════════════════════════
+
+
+// ═══ AUTH ════════════════════════════════════════════════════
+// ═══ INIT ════════════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', () => { checkSession(); setTimeout(()=>document.getElementById('login-pin')?.focus(),200); });
 
 
 
