@@ -2073,16 +2073,30 @@ async function saveMultiBatch(){
   }
   // Create one batch + cost lines per variant
   for(let _i=0;_i<variantData.length;_i++){const r=variantData[_i];const i=_i;
-    const v=gV(r.vid);if(!v)return;
+    const v=gV(r.vid);if(!v)continue;
     const unitShare=r.qty/totalUnits;
     const varShare=_nbSplitMode==='unit'?(r.qty*(totalNis/totalUnits)):(r.pct/100)*totalNis;
     const bId=uid();
-    const b={id:bId,variant_id:r.vid,product_id:v.product_id,supplier_id:supId,
+    const b={id:bId,variant_id:r.vid,product_id:v.product_id,supplier_id:supId||null,
       shipment_code:variantData.length===1?code:code+'-'+String(i+1).padStart(2,'0'),
-      shipment_date:date,qty_received:r.qty,qty_remaining:r.qty,
-      status,total_cost_usd:(costUsd+shipUsd+custUsd)*unitShare,total_cost_nis:varShare,unit_cost_nis:r.unitCost};
-    DB.batches.push(b);await dbInsert('batches',b);
-    const addCL=async(type,amtUsd,amtNis)=>{if(!amtNis)return;const cl={id:uid(),batch_id:bId,variant_id:r.vid,product_id:v.product_id,supplier_id:supId,cost_type:type,payment_date:date,amount_usd:amtUsd,amount_nis:amtNis,remark:type+' · '+vLabel(v)+' ('+(_nbSplitMode==='unit'?(r.qty+'/'+totalUnits+' units'):(r.pct+'%'))+')'};DB.stock_costs.push(cl);await dbInsert('stock_costs',cl);};
+      shipment_date:date||null,qty_received:r.qty,qty_remaining:r.qty,
+      status,total_cost_usd:(costUsd+shipUsd+custUsd)*unitShare,total_cost_nis:varShare,unit_cost_nis:r.unitCost,
+      notes:'',avg_cost_nis:r.unitCost};
+    DB.batches.push(b);
+    // Insert batch FIRST and wait for DB confirmation before inserting cost lines
+    await dbInsert('batches', b);
+    // Small delay to ensure FK is committed
+    await new Promise(resolve => setTimeout(resolve, 300));
+    // Now insert cost lines (batch FK is guaranteed to exist)
+    const addCL=async(type,amtUsd,amtNis)=>{
+      if(!amtNis||amtNis<=0)return;
+      const cl={id:uid(),batch_id:bId,variant_id:r.vid,product_id:v.product_id,
+        cost_type:type,payment_date:date||null,
+        amount_usd:amtUsd,amount_nis:amtNis,
+        remark:type+' for '+vLabel(v)};
+      DB.stock_costs.push(cl);
+      await dbInsert('stock_costs',cl);
+    };
     await addCL('Purchase',costUsd*unitShare,costUsd*unitShare*rate);
     await addCL('Shipping',shipUsd*unitShare,shipUsd*unitShare*rate);
     await addCL('Customs',custUsd*unitShare,custUsd*unitShare*rate);
