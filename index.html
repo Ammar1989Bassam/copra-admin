@@ -1122,8 +1122,25 @@ async function dbInsert(table, row) {
   for (const k of Object.keys(sbRow)) {
     if ((sbRow[k]===''||sbRow[k]===undefined) && _df.includes(k)) sbRow[k]=null;
   }
-  try { await callFn('data-write', {action:'insert', table:sbTable, row:sbRow}); }
-  catch(e) { console.warn('Insert failed:', table, e.message); }
+  try {
+    const result = await callFn('data-write', {action:'insert', table:sbTable, row:sbRow});
+    if (result && result.error) {
+      console.error('DB insert error ['+sbTable+']:', result.error);
+      // Show toast notification so we know writes are failing
+      const toast = document.createElement('div');
+      toast.style.cssText = 'position:fixed;bottom:20px;right:20px;background:#DC2626;color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;z-index:99999;max-width:300px';
+      toast.textContent = 'Save error ('+sbTable+'): '+result.error;
+      document.body.appendChild(toast);
+      setTimeout(()=>toast.remove(), 6000);
+    }
+  } catch(e) {
+    console.error('Insert failed ['+sbTable+']:', e.message, '| Row:', JSON.stringify(sbRow).substring(0,200));
+    const toast = document.createElement('div');
+    toast.style.cssText = 'position:fixed;bottom:20px;right:20px;background:#DC2626;color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;z-index:99999;max-width:300px';
+    toast.textContent = 'Save error ('+sbTable+'): '+e.message;
+    document.body.appendChild(toast);
+    setTimeout(()=>toast.remove(), 6000);
+  }
 }
 
 async function dbUpdate(table, id, updates) {
@@ -1135,7 +1152,7 @@ async function dbUpdate(table, id, updates) {
     if ((u[k]===''||u[k]===undefined) && _df.includes(k)) u[k]=null;
   }
   try { await callFn('data-write', {action:'update', table:sbTable, id, updates:u}); }
-  catch(e) { console.warn('Update failed:', table, e.message); }
+  catch(e) { console.error('Update failed ['+sbTable+']:', e.message); }
 }
 
 async function dbDelete(table, id) {
