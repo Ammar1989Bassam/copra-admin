@@ -2077,29 +2077,24 @@ async function saveMultiBatch(){
     const unitShare=r.qty/totalUnits;
     const varShare=_nbSplitMode==='unit'?(r.qty*(totalNis/totalUnits)):(r.pct/100)*totalNis;
     const bId=uid();
-    const b={id:bId,variant_id:r.vid,product_id:v.product_id,supplier_id:supId||null,
+    const batch={id:bId,variant_id:r.vid,product_id:v.product_id,supplier_id:supId||null,
       shipment_code:variantData.length===1?code:code+'-'+String(i+1).padStart(2,'0'),
       shipment_date:date||null,qty_received:r.qty,qty_remaining:r.qty,
-      status,total_cost_usd:(costUsd+shipUsd+custUsd)*unitShare,total_cost_nis:varShare,unit_cost_nis:r.unitCost,
-      notes:'',avg_cost_nis:r.unitCost};
-    DB.batches.push(b);
-    // Insert batch FIRST and wait for DB confirmation before inserting cost lines
-    await dbInsert('batches', b);
-    // Small delay to ensure FK is committed
-    await new Promise(resolve => setTimeout(resolve, 300));
-    // Now insert cost lines (batch FK is guaranteed to exist)
-    const addCL=async(type,amtUsd,amtNis)=>{
-      if(!amtNis||amtNis<=0)return;
+      status,total_cost_usd:(costUsd+shipUsd+custUsd)*unitShare,
+      total_cost_nis:varShare,unit_cost_nis:r.unitCost};
+    DB.batches.push(batch);
+    // Build cost lines
+    const costLines=[];
+    const mkCL=(type,amtUsd,amtNis)=>{if(!amtNis||amtNis<=0)return;
       const cl={id:uid(),batch_id:bId,variant_id:r.vid,product_id:v.product_id,
-        cost_type:type,payment_date:date||null,
-        amount_usd:amtUsd,amount_nis:amtNis,
+        cost_type:type,payment_date:date||null,amount_usd:amtUsd,amount_nis:amtNis,
         remark:type+' for '+vLabel(v)};
-      DB.stock_costs.push(cl);
-      await dbInsert('stock_costs',cl);
-    };
-    await addCL('Purchase',costUsd*unitShare,costUsd*unitShare*rate);
-    await addCL('Shipping',shipUsd*unitShare,shipUsd*unitShare*rate);
-    await addCL('Customs',custUsd*unitShare,custUsd*unitShare*rate);
+      DB.stock_costs.push(cl);costLines.push(cl);};
+    mkCL('Purchase',costUsd*unitShare,costUsd*unitShare*rate);
+    mkCL('Shipping',shipUsd*unitShare,shipUsd*unitShare*rate);
+    mkCL('Customs',custUsd*unitShare,custUsd*unitShare*rate);
+    // Insert batch + cost lines atomically via Edge Function
+    await callFn('data-write',{action:'insert_batch_with_costs',batch,cost_lines:costLines});
   }
   // Update variant stock quantities in Supabase
   const updatedVariants = new Set(variantData.map(r=>r.vid));
