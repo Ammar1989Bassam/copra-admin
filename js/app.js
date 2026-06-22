@@ -367,7 +367,7 @@ async function addSale(){
     car_make:v.car_make||'',car_model:v.car_model||'',year_from:v.year_from||'',year_to:v.year_to||'',
     set_type:v.set_type||'',remark:document.getElementById('s-rmk').value||'',
     gp_nis:+((price-fifoUnit)*qty).toFixed(2),is_return:false};
-  DB.sales.push(row);pushRow('sales',row);
+  DB.sales.push(row);await dbInsert('sales',row);
   closeM('m-sale');
   ['s-price','s-disc','s-rmk','s-cust','s-stock-info','s-cost'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
   document.getElementById('s-qty').value=1;
@@ -2039,7 +2039,7 @@ function nbAddRow(preVid,preQty){
   container.appendChild(div);
   nbCalcSplit();
 }
-function saveMultiBatch(){
+async function saveMultiBatch(){
   const code=document.getElementById('nb-code').value.trim();
   const date=document.getElementById('nb-date').value;
   const status=document.getElementById('nb-status').value;
@@ -2072,7 +2072,7 @@ function saveMultiBatch(){
     if(src){src.status='Depleted';src.qty_remaining=0;dbUpdate('batches', src.id, src);}
   }
   // Create one batch + cost lines per variant
-  variantData.forEach((r,i)=>{
+  for(let _i=0;_i<variantData.length;_i++){const r=variantData[_i];const i=_i;
     const v=gV(r.vid);if(!v)return;
     const unitShare=r.qty/totalUnits;
     const varShare=_nbSplitMode==='unit'?(r.qty*(totalNis/totalUnits)):(r.pct/100)*totalNis;
@@ -2081,12 +2081,18 @@ function saveMultiBatch(){
       shipment_code:variantData.length===1?code:code+'-'+String(i+1).padStart(2,'0'),
       shipment_date:date,qty_received:r.qty,qty_remaining:r.qty,
       status,total_cost_usd:(costUsd+shipUsd+custUsd)*unitShare,total_cost_nis:varShare,unit_cost_nis:r.unitCost};
-    DB.batches.push(b);pushRow('batches',b);
-    const addCL=(type,amtUsd,amtNis)=>{if(!amtNis)return;const cl={id:uid(),batch_id:bId,variant_id:r.vid,product_id:v.product_id,supplier_id:supId,cost_type:type,payment_date:date,amount_usd:amtUsd,amount_nis:amtNis,remark:type+' · '+vLabel(v)+' ('+(_nbSplitMode==='unit'?(r.qty+'/'+totalUnits+' units'):(r.pct+'%'))+')'};DB.stock_costs.push(cl);pushRow('stock_costs',cl);};
-    addCL('Purchase',costUsd*unitShare,costUsd*unitShare*rate);
-    addCL('Shipping',shipUsd*unitShare,shipUsd*unitShare*rate);
-    addCL('Customs',custUsd*unitShare,custUsd*unitShare*rate);
-  });
+    DB.batches.push(b);await dbInsert('batches',b);
+    const addCL=async(type,amtUsd,amtNis)=>{if(!amtNis)return;const cl={id:uid(),batch_id:bId,variant_id:r.vid,product_id:v.product_id,supplier_id:supId,cost_type:type,payment_date:date,amount_usd:amtUsd,amount_nis:amtNis,remark:type+' · '+vLabel(v)+' ('+(_nbSplitMode==='unit'?(r.qty+'/'+totalUnits+' units'):(r.pct+'%'))+')'};DB.stock_costs.push(cl);await dbInsert('stock_costs',cl);};
+    await addCL('Purchase',costUsd*unitShare,costUsd*unitShare*rate);
+    await addCL('Shipping',shipUsd*unitShare,shipUsd*unitShare*rate);
+    await addCL('Customs',custUsd*unitShare,custUsd*unitShare*rate);
+  }
+  // Update variant stock quantities in Supabase
+  const updatedVariants = new Set(variantData.map(r=>r.vid));
+  for(const vid of updatedVariants){
+    const newStock=getStock(vid);const vv=gV(vid);
+    if(vv){vv.stock_qty=newStock;await dbUpdate('variants',vid,{stock_qty:newStock,avg_cost_nis:getFifoCost(vid)||0});}
+  }
   closeM('m-newbatch');
   renderInv();
   if(document.getElementById('inv-t1')&&document.getElementById('inv-t1').style.display!=='none')renderStockCards();
