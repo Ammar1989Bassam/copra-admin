@@ -2742,3 +2742,10 @@ function rejectReservation(id){
 }
 
 // nav and openM patches have been merged into the original functions above
+
+
+// ── Legacy Google Apps Script stubs (no longer used — Supabase/Edge Functions replaced GAS) ──
+function testConn(){ alert('Google Sheets integration removed. Data now lives in Supabase.'); }
+function pushAll(){ alert('Google Sheets integration removed. All data is in Supabase.'); }
+function pullAll(){ alert('Google Sheets integration removed. All data is in Supabase.'); }
+function downloadGAS(){ alert('Google Apps Script integration removed. System now uses Supabase Edge Functions.'); }
